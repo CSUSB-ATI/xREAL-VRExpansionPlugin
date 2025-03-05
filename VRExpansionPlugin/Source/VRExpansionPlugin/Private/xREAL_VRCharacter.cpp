@@ -64,6 +64,11 @@ AxREAL_VRCharacter::AxREAL_VRCharacter(const FObjectInitializer& ObjectInitializ
         Body->SetRelativeScale3D(FVector(0.5f, 0.5f, 0.1f));
     }
 
+
+    // Does not affect the final position of the controllers, only set to make the controllers more visible in editor viewport.
+	RightMotionController->SetWorldLocation(FVector(65.074234, 30.863922, 9.278572));
+	LeftMotionController->SetWorldLocation(FVector(65.0, -43.256454, -11.514534));
+
     // Set up text elements on motion controllers
     TextR = CreateDefaultSubobject<UTextRenderComponent>(TEXT("TextR"));
     if (TextR)
