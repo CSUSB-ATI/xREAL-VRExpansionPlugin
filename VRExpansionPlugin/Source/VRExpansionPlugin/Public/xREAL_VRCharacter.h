@@ -342,6 +342,9 @@ protected:
 	// Input Handler Functions
 
 	UFUNCTION()
+	void ToggleWristMenu_Started();
+
+	UFUNCTION()
 	void TeleportRight_Started();
 	UFUNCTION()
 	void TeleportRight_Completed();
@@ -428,6 +431,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
 	bool bWristMenuOnRightHand;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "UI")
+	bool bIsWristMenuEnabled = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
+	FVector WristMenuRelativeLocation = FVector(0,0,0);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
+	FRotator WristMenuRelativeRotation = FRotator(0,0,0);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
 	TSubclassOf<AWristMenuActor> WristMenuActorClass;

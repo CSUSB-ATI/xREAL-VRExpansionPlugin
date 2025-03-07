@@ -355,6 +355,14 @@ void AxREAL_VRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
             PlayerEnhancedInputComponent->BindAction(TeleportLeft, ETriggerEvent::Started, this, &AxREAL_VRCharacter::TeleportLeft_Started);
             PlayerEnhancedInputComponent->BindAction(TeleportLeft, ETriggerEvent::Completed, this, &AxREAL_VRCharacter::TeleportLeft_Completed);
         }
+        
+        if (bUseWristMenu)
+        {
+			if (UInputAction* ToggleWristMenu = FindFirstObjectSafe<UInputAction>(TEXT("ToggleWristMenu")))
+			{
+				PlayerEnhancedInputComponent->BindAction(ToggleWristMenu, ETriggerEvent::Started, this, &AxREAL_VRCharacter::ToggleWristMenu_Started);
+			}
+        }
     }
 
     PlayerInputComponent->BindKey(EKeys::Escape, EInputEvent::IE_Pressed, this, &AxREAL_VRCharacter::QuitGame);
@@ -549,6 +557,11 @@ void AxREAL_VRCharacter::HandleCurrentMovementInput_Implementation(float Movemen
 }
 
 //Input Handlers
+
+void AxREAL_VRCharacter::ToggleWristMenu_Started()
+{
+    SetWristMenuEnabled(!bIsWristMenuEnabled);
+}
 
 void AxREAL_VRCharacter::TeleportRight_Started()
 {
@@ -1729,22 +1742,21 @@ void AxREAL_VRCharacter::SpawnWristMenu()
 		if (bWristMenuOnRightHand && GraspingHandRight)
 		{
 			WristMenuActor->AttachToActor(GraspingHandRight, FAttachmentTransformRules::SnapToTargetNotIncludingScale, FName("wrist_outer_r"));
-			//WristMenuActor->SetActorRelativeLocation(FVector(0,0,-50));
-            WristMenuActor->SetActorRelativeRotation(FRotator(0, 0, 180));
 			
 		}
 		else if (!bWristMenuOnRightHand && GraspingHandLeft)
 		{
 			WristMenuActor->AttachToActor(GraspingHandLeft, FAttachmentTransformRules::SnapToTargetNotIncludingScale, FName("wrist_outer_r"));
-			//WristMenuActor->SetActorRelativeLocation(FVector(0,0,-50));
-            WristMenuActor->SetActorRelativeRotation(FRotator(0, 0, 180));
-
 		}
 		else
 		{
 			UE_LOG(LogTemp, Warning, TEXT("WristMenuActor not spawned, no valid motion controller to attach to!"));
+            return;
 		}
 
+		WristMenuActor->SetActorRelativeLocation(WristMenuRelativeLocation);
+		WristMenuActor->SetActorRelativeRotation(WristMenuRelativeRotation);
+        SetWristMenuEnabled(false);
     }
 }
 
@@ -1753,6 +1765,7 @@ void AxREAL_VRCharacter::SetWristMenuEnabled(bool bEnabled)
     if (WristMenuActor)
     {
         WristMenuActor->SetWristMenuEnabled(bEnabled);
+        bIsWristMenuEnabled = bEnabled;
     }
 }
 
