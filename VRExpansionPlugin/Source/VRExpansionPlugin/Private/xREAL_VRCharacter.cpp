@@ -1726,16 +1726,16 @@ void AxREAL_VRCharacter::SpawnWristMenu()
             return;
         }
 		WristMenuActor = GetWorld()->SpawnActor<AWristMenuActor>(WristMenuActorClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-		if (bWristMenuOnRightHand && RightMotionController)
+		if (bWristMenuOnRightHand && GraspingHandRight)
 		{
-			WristMenuActor->AttachToComponent(RightMotionController, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			WristMenuActor->AttachToActor(GraspingHandRight, FAttachmentTransformRules::SnapToTargetNotIncludingScale, FName("wrist_outer_r"));
 			//WristMenuActor->SetActorRelativeLocation(FVector(0,0,-50));
             WristMenuActor->SetActorRelativeRotation(FRotator(0, 0, 180));
 			
 		}
-		else if (!bWristMenuOnRightHand && LeftMotionController)
+		else if (!bWristMenuOnRightHand && GraspingHandLeft)
 		{
-			WristMenuActor->AttachToComponent(LeftMotionController, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			WristMenuActor->AttachToActor(GraspingHandLeft, FAttachmentTransformRules::SnapToTargetNotIncludingScale, FName("wrist_outer_r"));
 			//WristMenuActor->SetActorRelativeLocation(FVector(0,0,-50));
             WristMenuActor->SetActorRelativeRotation(FRotator(0, 0, 180));
 

@@ -22,6 +22,8 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 protected:
+	virtual void SpawnWristMenu() override;
+
 	UFUNCTION()
 	void MoveLaserSpline();
 

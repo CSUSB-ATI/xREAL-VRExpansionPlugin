@@ -5,6 +5,7 @@
 #include "Camera/CameraActor.h"
 #include "EnhancedInputComponent.h"
 #include "VRRootComponent.h"
+#include "WristMenuActor.h"
 #include "PlayerMappableInputConfig.h"
 
 
@@ -51,6 +52,27 @@ void AxREAL_FPS_VRCharacter::BeginPlay()
 void AxREAL_FPS_VRCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+}
+
+// This function is not complete, needs to be fixed.
+void AxREAL_FPS_VRCharacter::SpawnWristMenu()
+{
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("FPS"));
+    if (!WristMenuActor)
+    {
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.Owner = this;
+        SpawnParams.Instigator = GetInstigator();
+
+        if (!WristMenuActorClass)
+        {
+			UE_LOG(LogTemp, Warning, TEXT("WristMenuActor not spawned, WristMenuActorClass not set in VRCharacter!"));
+            return;
+        }
+		WristMenuActor = GetWorld()->SpawnActor<AWristMenuActor>(WristMenuActorClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+		WristMenuActor->AttachToComponent(VRReplicatedCamera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		WristMenuActor->SetActorRelativeLocation(FVector(0, 0, 100));
+    }
 }
 
 void AxREAL_FPS_VRCharacter::MoveLaserSpline()

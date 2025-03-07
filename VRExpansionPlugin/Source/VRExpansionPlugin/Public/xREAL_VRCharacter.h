@@ -141,7 +141,7 @@ public:
 protected:
 	virtual void SwitchOutOfBodyCamera_Implementation(bool SwitchToOutOfBody);
 
-	void SpawnWristMenu();
+	virtual void SpawnWristMenu();
 
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void SetWristMenuEnabled(bool bEnabled);
