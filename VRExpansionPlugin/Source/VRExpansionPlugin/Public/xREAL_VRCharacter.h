@@ -29,6 +29,12 @@ public:
 	AxREAL_VRCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 	
 	void InitializeDefaults();
+    
+    void InitializeHeadMesh();
+
+    void InitializeBody();
+
+    void InitializeMotionControllers();
 
 	// Function for replicating variables
 	void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

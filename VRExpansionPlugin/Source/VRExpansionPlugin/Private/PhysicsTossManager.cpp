@@ -113,7 +113,7 @@ void UPhysicsTossManager::CancelToss_Implementation()
 
 void UPhysicsTossManager::CancelThrowing_Implementation(UPrimitiveComponent* ObjectToCancel)
 {
-    if (ObjectToCancel->IsValidLowLevel())
+    if (IsValid(ObjectToCancel))
     {
         ObjectToCancel->OnComponentHit.RemoveDynamic(this, &UPhysicsTossManager::CancelThrow);
     }
@@ -130,10 +130,10 @@ void UPhysicsTossManager::CancelThrow_Implementation(UPrimitiveComponent* HitCom
 
 void UPhysicsTossManager::IsThrowing_Implementation(bool &Throwing)
 {
-    Throwing = ObjectBeingThrown->IsValidLowLevel();
+    Throwing = IsValid(ObjectBeingThrown);
 }
 
 void UPhysicsTossManager::ToggleTick_Implementation()
 {
-    SetComponentTickEnabled(ObjectBeingThrown->IsValidLowLevel());
+    SetComponentTickEnabled(IsValid(ObjectBeingThrown));
 }

@@ -26,21 +26,10 @@ AxREAL_VRCharacter::AxREAL_VRCharacter(const FObjectInitializer& ObjectInitializ
     bReplicates = true;
     
     InitializeDefaults();
+    InitializeHeadMesh();
+    InitializeBody();
+    InitializeMotionControllers();
     
-    // Set up head mesh component
-    HeadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HeadMesh"));
-    if (HeadMesh)
-    {
-        HeadMesh->SetupAttachment(VRReplicatedCamera);
-        HeadMesh->SetRelativeScale3D(FVector(0.25f, 0.25f, 0.25f));
-		static ConstructorHelpers::FObjectFinder<UStaticMesh>MeshAsset(TEXT("StaticMesh'/VRExpansionPlugin/VRE/Misc/Meshes/1M_Cube_Chamfer.1M_Cube_Chamfer'"));
-        if (MeshAsset.Object)
-        {
-            HeadMesh->SetStaticMesh(MeshAsset.Object);
-        }
-
-        HeadMesh->SetCollisionProfileName(FName(TEXT("NoCollision")));
-    }
 
     // Set up player name text component
     PlayerNameDisplay = CreateDefaultSubobject<UTextRenderComponent>(TEXT("PlayerNameDisplay"));
@@ -55,7 +44,100 @@ AxREAL_VRCharacter::AxREAL_VRCharacter(const FObjectInitializer& ObjectInitializ
         PlayerNameDisplay->SetWorldSize(26.0f);
     }
 
-    // Set up body mesh component
+
+
+}
+
+void AxREAL_VRCharacter::InitializeDefaults()
+{
+    AlwaysAllowClimbing = true;
+    bThumbPadEffectsSlidingDirection = true;
+
+    FadeinDuration = 0.25f;
+    FadeOutDuration = 0.25f;
+
+    TeleportThumbDeadzone = 0.4f;
+
+    bTurnModeIsSnap = true;
+    SnapTurnAngle = 45.0f;
+    SmoothTurnSpeed = 50.0f;
+    TurningActivationThreshold = 0.7f;
+    CurrentMovementMode = EVRMovementMode::Teleport;
+    MovementModeRight = EVRMovementMode::Teleport;
+    DPadVelocityScaler = 1.25f;
+    SwingAndRunMagnitude = 2.0f;
+    RunningInPlaceScaler = 2.0f;
+
+    RIPMotionSmoothingSteps = 15;
+    MinimumRIPVelocity = 0.3f;
+    RipMotionLowPassSmoothingSteps = 1;
+    MinimumLowEndRipVelocity = 0.1f;
+
+    bTwoHandMovement = true;
+
+    PeakVelocityLeft.VelocitySamples = 30;
+    PeakVelocityRight.VelocitySamples = 30;
+
+    ThrowingMassMaximum = 50.0f;
+    MassScalerMin = 0.3f;
+    MaximumThrowingVelocity = 1000.0f;
+
+    bLimitMaxThrowVelocity = true;
+    GripTraceLength = 0.1f;
+    HandStateRight = EGripState::Open;
+    HandStateLeft = EGripState::Open;
+
+    DefaultGripTag = FGameplayTag::RequestGameplayTag(FName("GripType.OnPrimaryGrip"));
+    DefaultDropTag = FGameplayTag::RequestGameplayTag(FName("DropType.OnPrimaryGripRelease"));
+    DefaultSecondaryDropTag = FGameplayTag::RequestGameplayTag(FName("DropType.Secondary.OnPrimaryGripRelease"));
+    DefaultSecondaryGripTag = FGameplayTag::RequestGameplayTag(FName("GripType.Secondary.OnPrimaryGrip"));
+
+    // World Static, World Dynamic, Pawn, Physics Body, Vehicle, Destructible
+    CollisionToCheckDuringGrip = TArray<TEnumAsByte<EObjectTypeQuery>>({
+        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic),
+        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldDynamic),
+        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn),
+        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_PhysicsBody),
+        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Vehicle),
+        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Destructible)});
+
+    ThrowingMassScaleFactor = 10.0f;
+
+    IsObjectRelative = true;
+
+    CurrentControllerTypeXR = EBPOpenXRControllerDeviceType::DT_SimpleController;
+
+    InputConfig = FindFirstObjectSafe<UPlayerMappableInputConfig>(TEXT("/VRExpansionPlugin/VRE/Input/VREInputConfig.VREInputConfig"));
+
+    HeadsetType = EBPHMDDeviceType::DT_OculusHMD;
+
+    SpawnGraspingHands = true;
+    UsePhysicalGraspingHands = false;
+
+    // Wrist Menu Defaults
+    bUseWristMenu = false;
+    bWristMenuOnRightHand = false;
+}
+
+void AxREAL_VRCharacter::InitializeHeadMesh()
+{
+    HeadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HeadMesh"));
+    if (HeadMesh)
+    {
+        HeadMesh->SetupAttachment(VRReplicatedCamera);
+        HeadMesh->SetRelativeScale3D(FVector(0.25f, 0.25f, 0.25f));
+		static ConstructorHelpers::FObjectFinder<UStaticMesh>MeshAsset(TEXT("StaticMesh'/VRExpansionPlugin/VRE/Misc/Meshes/1M_Cube_Chamfer.1M_Cube_Chamfer'"));
+        if (MeshAsset.Object)
+        {
+            HeadMesh->SetStaticMesh(MeshAsset.Object);
+        }
+
+        HeadMesh->SetCollisionProfileName(FName(TEXT("NoCollision")));
+    }
+}
+
+void AxREAL_VRCharacter::InitializeBody()
+{
     Body = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Body"));
     if (Body)
     {
@@ -63,8 +145,10 @@ AxREAL_VRCharacter::AxREAL_VRCharacter(const FObjectInitializer& ObjectInitializ
         Body->SetRelativeLocation(FVector(-15.0f, 0.0f, -61.59807f));
         Body->SetRelativeScale3D(FVector(0.5f, 0.5f, 0.1f));
     }
+}
 
-
+void AxREAL_VRCharacter::InitializeMotionControllers()
+{
     // Does not affect the final position of the controllers, only set to make the controllers more visible in editor viewport.
 	RightMotionController->SetWorldLocation(FVector(65.074234, 30.863922, 9.278572));
 	LeftMotionController->SetWorldLocation(FVector(65.0, -43.256454, -11.514534));
@@ -172,77 +256,7 @@ AxREAL_VRCharacter::AxREAL_VRCharacter(const FObjectInitializer& ObjectInitializ
         GrabSphereLeft->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
         GrabSphereLeft->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Overlap);
     }
-}
 
-void AxREAL_VRCharacter::InitializeDefaults()
-{
-    AlwaysAllowClimbing = true;
-    bThumbPadEffectsSlidingDirection = true;
-
-    FadeinDuration = 0.25f;
-    FadeOutDuration = 0.25f;
-
-    TeleportThumbDeadzone = 0.4f;
-
-    bTurnModeIsSnap = true;
-    SnapTurnAngle = 45.0f;
-    SmoothTurnSpeed = 50.0f;
-    TurningActivationThreshold = 0.7f;
-    CurrentMovementMode = EVRMovementMode::Teleport;
-    MovementModeRight = EVRMovementMode::Teleport;
-    DPadVelocityScaler = 1.25f;
-    SwingAndRunMagnitude = 2.0f;
-    RunningInPlaceScaler = 2.0f;
-
-    RIPMotionSmoothingSteps = 15;
-    MinimumRIPVelocity = 0.3f;
-    RipMotionLowPassSmoothingSteps = 1;
-    MinimumLowEndRipVelocity = 0.1f;
-
-    bTwoHandMovement = true;
-
-    PeakVelocityLeft.VelocitySamples = 30;
-    PeakVelocityRight.VelocitySamples = 30;
-
-    ThrowingMassMaximum = 50.0f;
-    MassScalerMin = 0.3f;
-    MaximumThrowingVelocity = 1000.0f;
-
-    bLimitMaxThrowVelocity = true;
-    GripTraceLength = 0.1f;
-    HandStateRight = EGripState::Open;
-    HandStateLeft = EGripState::Open;
-
-    DefaultGripTag = FGameplayTag::RequestGameplayTag(FName("GripType.OnPrimaryGrip"));
-    DefaultDropTag = FGameplayTag::RequestGameplayTag(FName("DropType.OnPrimaryGripRelease"));
-    DefaultSecondaryDropTag = FGameplayTag::RequestGameplayTag(FName("DropType.Secondary.OnPrimaryGripRelease"));
-    DefaultSecondaryGripTag = FGameplayTag::RequestGameplayTag(FName("GripType.Secondary.OnPrimaryGrip"));
-
-    // World Static, World Dynamic, Pawn, Physics Body, Vehicle, Destructible
-    CollisionToCheckDuringGrip = TArray<TEnumAsByte<EObjectTypeQuery>>({
-        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic),
-        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldDynamic),
-        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn),
-        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_PhysicsBody),
-        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Vehicle),
-        UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Destructible)});
-
-    ThrowingMassScaleFactor = 10.0f;
-
-    IsObjectRelative = true;
-
-    CurrentControllerTypeXR = EBPOpenXRControllerDeviceType::DT_SimpleController;
-
-    InputConfig = FindFirstObjectSafe<UPlayerMappableInputConfig>(TEXT("/VRExpansionPlugin/VRE/Input/VREInputConfig.VREInputConfig"));
-
-    HeadsetType = EBPHMDDeviceType::DT_OculusHMD;
-
-    SpawnGraspingHands = true;
-    UsePhysicalGraspingHands = false;
-
-    // Wrist Menu Defaults
-    bUseWristMenu = false;
-    bWristMenuOnRightHand = false;
 }
 
 void AxREAL_VRCharacter::BeginPlay()

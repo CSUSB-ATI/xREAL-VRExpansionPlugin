@@ -397,7 +397,7 @@ void ATeleportController::GetTeleportDestination(bool RelativeToHMD, FVector &Lo
 {
     FVector devicePosition;
     FQuat deviceRotation;
-    GEngine->XRSystem->GetCurrentPose(IXRTrackingSystem::HMDDeviceId, deviceRotation, devicePosition);
+    //GEngine->XRSystem->GetCurrentPose(IXRTrackingSystem::HMDDeviceId, deviceRotation, devicePosition);
     if (RelativeToHMD)
     {
         FVector heightAgnosticPosition = FVector(devicePosition.X, devicePosition.Y, 0.0f);
@@ -464,7 +464,7 @@ void ATeleportController::InitController()
 
 void ATeleportController::ToggleTick()
 {
-    SetActorTickEnabled(IsTeleporterActive || IsLaserBeamActive || ActorBeingThrown->IsValidLowLevel());
+    SetActorTickEnabled(IsTeleporterActive || IsLaserBeamActive || IsValid(ActorBeingThrown));
 }
 
 void ATeleportController::ClearLaserBeam()
