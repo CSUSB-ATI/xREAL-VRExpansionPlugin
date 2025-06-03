@@ -856,7 +856,7 @@ void AxREAL_VRCharacter::MotionControllerThumbRight_Y_Handler(const FInputAction
 
 #pragma region Utility and Helper Functions
 
-void AxREAL_VRCharacter::WriteToLog(bool Left, FString &Text)
+void AxREAL_VRCharacter::SetControllerText(bool Left, FString &Text)
 {
     if (Left && IsValid(TextL))
     {
@@ -2030,7 +2030,7 @@ void AxREAL_VRCharacter::CycleMovementModes(bool IsLeft)
         bTurnModeIsSnap = !bTurnModeIsSnap;
         mode = bTurnModeIsSnap?TEXT("Snap Turn"):TEXT("Smooth Turn");
         // Show movement mode above controller
-        WriteToLog(IsLeft, mode);
+        SetControllerText(IsLeft, mode);
     }
     else
     {
@@ -2042,14 +2042,14 @@ void AxREAL_VRCharacter::CycleMovementModes(bool IsLeft)
             case EVRMovementMode::ClimbingMode:
                 CurrentMovementMode = EVRMovementMode::Teleport;
                 mode = TEXT("Teleport");
-                WriteToLog(IsLeft, mode);
+                SetControllerText(IsLeft, mode);
                 break;
             
             default:
                 CurrentMovementMode = static_cast<EVRMovementMode>(static_cast<int>(CurrentMovementMode)+1);
                 mode = UEnum::GetValueAsString(CurrentMovementMode);
                 // Show movement mode above controller
-                WriteToLog(IsLeft, mode);
+                SetControllerText(IsLeft, mode);
                 break;
             }
 
@@ -2693,7 +2693,7 @@ void AxREAL_VRCharacter::SetGripComponents(UPrimitiveComponent *LeftHand, UPrimi
     else
     {
         FString errorText = TEXT("Invalid Grip Component Set for Left Hand");
-        WriteToLog(true, errorText);
+        SetControllerText(true, errorText);
     }
     if (IsValid(RightHand))
     {
@@ -2703,7 +2703,7 @@ void AxREAL_VRCharacter::SetGripComponents(UPrimitiveComponent *LeftHand, UPrimi
     else
     {
         FString errorText = TEXT("Invalid Grip Component Set for Right Hand");
-        WriteToLog(true, errorText);
+        SetControllerText(true, errorText);
     }
 }
 
@@ -3033,10 +3033,10 @@ void AxREAL_VRCharacter::SetMovementHands_Implementation(bool RightHandForMoveme
     {
         FString enumValueName = EnumPtr->GetNameStringByValue(static_cast<int32>(CurrentMovementMode));
         //TODO: Check to make sure this works
-        WriteToLog(!bRightHandMovement, enumValueName);
+        SetControllerText(!bRightHandMovement, enumValueName);
     }
     FString text = bTurnModeIsSnap ? "Snap Turn" : "Smooth Turn";
-    WriteToLog(bRightHandMovement, text);
+    SetControllerText(bRightHandMovement, text);
 }
 
 FVector AxREAL_VRCharacter::MapThumbToWorld_Implementation(FRotator PadRotation, UGripMotionControllerComponent *CallingHand)

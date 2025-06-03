@@ -73,7 +73,7 @@ public:
 
 	bool IsALocalGrip(EGripMovementReplicationSettings GripRepType);
 
-	void WriteToLog(bool Left, FString& Text);
+	void SetControllerText(bool Left, FString& Text);
 
 	void TryToGrabObject(UObject* ObjectToTryToGrab, FTransform WorldTransform, UGripMotionControllerComponent* Hand, UGripMotionControllerComponent* OtherHand, bool IsSlotGrip, FGameplayTag GripSecondaryTag, FName GripBoneName, FName SlotName, bool IsSecondaryGrip, bool& Gripped);
 
