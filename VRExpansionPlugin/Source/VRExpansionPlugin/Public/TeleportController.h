@@ -162,7 +162,7 @@ public:
 	bool IsValidTeleportDestination;
 
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Default")
-	TEnumAsByte<EGripState> GripState;
+	EGripState GripState;
 
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Default")
 	bool bWantsToGrip;
