@@ -19,6 +19,7 @@ class UTextRenderComponent;
 class UVOIPTalker;
 class UInputAction;
 class AWristMenuActor;
+class UTeleportComponent;
 
 UCLASS(Blueprintable, BlueprintType)
 class VREXPANSIONPLUGIN_API AxREAL_VRCharacter : public AVRCharacter
@@ -35,6 +36,8 @@ public:
     void InitializeBody();
 
     void InitializeMotionControllers();
+
+    void SetupTeleportControllers();
 
 	// Function for replicating variables
 	void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -139,9 +142,6 @@ public:
 	void SwitchOutOfBodyCamera(bool SwitchToOutOfBody);
 
 	UFUNCTION(BlueprintCallable)
-	void ExecuteTeleportation(ATeleportController* MotionController, EVRMovementMode MovementMode, EControllerHand Hand);
-	
-	UFUNCTION(BlueprintCallable)
 	void SetTeleporterActive(EControllerHand Hand, bool Active);
 
 protected:
@@ -151,13 +151,6 @@ protected:
 
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void SetWristMenuEnabled(bool bEnabled);
-
-
-	UFUNCTION(Server, Reliable, Category="Teleport")
-	void NotifyTeleportActive_Server(EControllerHand Hand, bool State);
-
-	UFUNCTION(NetMulticast, Reliable, Category="Teleport")
-	void TeleportActive_Multicast(EControllerHand Hand, bool State);
 
 	virtual void NavigationMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
 
@@ -171,11 +164,6 @@ protected:
 	 * YAxis is automatically inverted
 	 */
 	void CalcPadRotationAndMagnitude(float YAxis, float XAxis, float OptMagnitudeScaler, float OptionalDeadzone, FRotator& Rotation, float& Magnitude, bool& WasValid);
-
-	void UpdateTeleportRotations();
-
-	/** Pivot is in world space */
-	void GetCharacterRotatedPosition(FVector OriginalLocation, FRotator DeltaRotation, FVector PivotPoint, FRotator& OutRotation, FVector& OutNewPosition);
 
 	/// @return If the tag is matched or is the default tag
 	bool ValidateGameplayTag(FGameplayTag BaseTag, FGameplayTag GameplayTag, UObject* Object, FGameplayTag DefaultTag);
@@ -211,6 +199,10 @@ protected:
 	virtual void SetVehicleMode_Implementation(bool IsInVehicleMode, bool& IsVR);
 
 public:
+
+	/** Pivot is in world space */
+	void GetCharacterRotatedPosition(FVector OriginalLocation, FRotator DeltaRotation, FVector PivotPoint, FRotator& OutRotation, FVector& OutNewPosition);
+
 	void SetVehicleMode(bool IsInVehicleMode);
 
 	bool ShouldGripComponent(UPrimitiveComponent* ComponentToCheck, uint8 GripPrioToCheckAgainst, bool bCheckAgainstPrior, FName BoneName, FGameplayTagContainer RelevantGameplayTags, UGripMotionControllerComponent* CallingController, UObject*& ObjectToGrip, bool& ObjectImplementsInterface, FTransform& ObjectsWorldTransform, uint8& GripPrio);
@@ -260,15 +252,15 @@ public:
 	void ShouldSocketGrip(UPARAM(ref) FBPActorGripInformation& Grip, bool& ShouldSocket, USceneComponent*& SocketParent, FTransform_NetQuantize& RelativeTransform, FName& OptionalSocketName);
 
 	UFUNCTION(BlueprintNativeEvent)
-	void InitTeleportControllers_Event();
-	   
-	UFUNCTION(BlueprintNativeEvent)
 	void OnPlayerStateReplicated(const APlayerState* NewPlayerState);
 
 protected:
 	virtual void OnPlayerStateReplicated_Implementation(const APlayerState* NewPlayerState);
 
 public:
+
+    UFUNCTION(BlueprintNativeEvent)
+    void LoopTryInitTeleportControllers();
 
 	/** Initialize controllers and setup voice */
 	UFUNCTION(BlueprintNativeEvent)
@@ -500,29 +492,17 @@ public:
 
 	FTimerHandle GetControllerType_TimerHandle;
 
-	FTimerHandle InitTeleportControllers_TimerHandle;
-
 	FTimerHandle TeleportFade_TimerHandle;
 
 	FTimerHandle NavigationFinishedTeleportFade_TimerHandle;
 
-	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport")
-	bool IsTeleporting;
+    FTimerHandle InitTeleportControllers_TimerHandle;
 
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport")
 	float FadeinDuration;
 
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport")
-	FLinearColor TeleportFadeColor;
-
-	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport")
 	float FadeOutDuration;
-
-	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport", Transient)
-	TObjectPtr<ATeleportController> TeleportControllerLeft;
-
-	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport", Transient)
-	TObjectPtr<ATeleportController> TeleportControllerRight;
 
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Movement")
 	EVRMovementMode CurrentMovementMode;
@@ -620,11 +600,14 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Control Booleans", meta=(DisplayName="B Thumb Pad Effects Sliding Direction"))
 	bool bThumbPadEffectsSlidingDirection;
 
-	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Control Booleans", meta=(DisplayName="B Teleport Uses Thumb Rotation"))
-	bool bTeleportUsesThumbRotation;
-
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport")
 	double TeleportThumbDeadzone;
+
+    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport")
+    ATeleportController* TeleportControllerRight;
+    
+    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Teleport")
+    ATeleportController* TeleportControllerLeft;
 
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Gripping", meta=(MultiLine="true"))
 	FGameplayTag DefaultGripTag;
@@ -773,6 +756,9 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Movement")
 	bool bAllowCycleMovementMode;
+
+	UPROPERTY(BlueprintReadWrite, VisibleAnywhere, Category="VR")
+	UTeleportComponent* TeleportComponent;
 
 private:
 

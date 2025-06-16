@@ -18,6 +18,7 @@
 #include "UObject/ConstructorHelpers.h"
 #include "WristMenuActor.h"
 #include "ParentRelativeAttachmentComponent.h"
+#include "TeleportComponent.h"
 
 #pragma region Initialization
 
@@ -44,7 +45,7 @@ AxREAL_VRCharacter::AxREAL_VRCharacter(const FObjectInitializer& ObjectInitializ
         PlayerNameDisplay->SetWorldSize(26.0f);
     }
 
-
+    TeleportComponent = CreateDefaultSubobject<UTeleportComponent>(TEXT("TeleportComponent"));
 
 }
 
@@ -262,14 +263,11 @@ void AxREAL_VRCharacter::InitializeMotionControllers()
 void AxREAL_VRCharacter::BeginPlay()
 {
     Super::BeginPlay();
+
     if (!HasAuthority())
     {
-        CharacterSetup(); //Runs in PossessedBy function on the server since BeginPlay runs before possession on server.
+        CharacterSetup(); // Runs in PossessedBy function on the server since BeginPlay runs before possession on server.
     }
-    
-
-    RightMotionController->OnGrippedObject.AddDynamic(this, &AxREAL_VRCharacter::OnRightMotionControllerGripped);
-    LeftMotionController->OnGrippedObject.AddDynamic(this, &AxREAL_VRCharacter::OnLeftMotionControllerGripped);
 
 }
 
@@ -382,37 +380,9 @@ void AxREAL_VRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
     PlayerInputComponent->BindKey(EKeys::Escape, EInputEvent::IE_Pressed, this, &AxREAL_VRCharacter::QuitGame);
 }
 
-void AxREAL_VRCharacter::InitTeleportControllers_Event_Implementation()
+void AxREAL_VRCharacter::SetupTeleportControllers()
 {
-    if (HasAuthority())
-    {
-        if (IsValid(GetPlayerState()))
-        {
-            InitTeleportControllers(GetPlayerState());
-        }
-        else
-        {
-            GetWorldTimerManager().SetTimer(InitTeleportControllers_TimerHandle, FTimerDelegate::CreateLambda([this]() {
-                if (IsValid(GetPlayerState()))
-                {
-                    InitTeleportControllers(GetPlayerState());
-                    GetWorldTimerManager().ClearTimer(InitTeleportControllers_TimerHandle);
-                }
-            }), 0.1f, true);
-        }
-    }
-    else
-    {
-        if (IsValid(GetPlayerState()))
-        {
-            InitTeleportControllers(GetPlayerState());
-        }
-        else
-        {
-            // Bind event to on player state replicated
-            OnPlayerStateReplicated_Bind.AddDynamic(this, &AxREAL_VRCharacter::OnPlayerStateReplicated);
-        }
-    }
+    
 }
 
 void AxREAL_VRCharacter::OnPlayerStateReplicated_Implementation(const APlayerState* NewPlayerState)
@@ -439,7 +409,10 @@ void AxREAL_VRCharacter::Tick(float DeltaTime)
         CalculateRelativeVelocities();
         // CheckAndHandleClimbingMovement(DeltaTime); This was disconnected in the original blueprint
         CheckAndHandleGripAnimations();
-        UpdateTeleportRotations();
+
+        if (IsValid(TeleportComponent))
+            TeleportComponent->UpdateTeleportRotations(MotionControllerThumbLeft_X_Value, MotionControllerThumbLeft_Y_Value, MotionControllerThumbRight_X_Value, MotionControllerThumbRight_Y_Value, GetVRRotation());
+
         SampleGripVelocities();
     }
 }
@@ -588,8 +561,8 @@ void AxREAL_VRCharacter::TeleportRight_Started()
         case EVRMovementMode::OutOfBodyNavigation:
             if (!IsHandClimbing && !bIsOutOfBody && !DisableMovement)
             {
-                SetTeleporterActive(EControllerHand::Right, true);
-                SetTeleporterActive(EControllerHand::Left, false);
+                if (TeleportComponent)
+                    TeleportComponent->TeleportRight_Started();
             }
             break; 
         
@@ -612,8 +585,8 @@ void AxREAL_VRCharacter::TeleportRight_Completed()
             if (!IsHandClimbing && !bIsOutOfBody && !DisableMovement)
             {
 
-                if (TeleportControllerRight->IsTeleporterActive)
-                    ExecuteTeleportation(TeleportControllerRight, CurrentMovementMode, EControllerHand::Right);
+                if (TeleportComponent)
+                    TeleportComponent->TeleportRight_Completed();
             }
             break; 
         
@@ -634,8 +607,8 @@ void AxREAL_VRCharacter::TeleportLeft_Started()
         case EVRMovementMode::OutOfBodyNavigation:
             if (!IsHandClimbing && !bIsOutOfBody && !DisableMovement)
             {
-                SetTeleporterActive(EControllerHand::Left, true);
-                SetTeleporterActive(EControllerHand::Right, false);
+                if (TeleportComponent)
+                    TeleportComponent->TeleportLeft_Started();
             }
             break; 
         
@@ -643,6 +616,7 @@ void AxREAL_VRCharacter::TeleportLeft_Started()
             break;
         }
     }
+
 }
 
 void AxREAL_VRCharacter::TeleportLeft_Completed()
@@ -656,8 +630,8 @@ void AxREAL_VRCharacter::TeleportLeft_Completed()
         case EVRMovementMode::OutOfBodyNavigation:
             if (!IsHandClimbing && !bIsOutOfBody && !DisableMovement)
             {
-                if (TeleportControllerLeft->IsTeleporterActive)
-                    ExecuteTeleportation(TeleportControllerLeft, CurrentMovementMode, EControllerHand::Left);
+                if (TeleportComponent)
+                    TeleportComponent->TeleportLeft_Completed();
             }
             break; 
         
@@ -989,6 +963,10 @@ void AxREAL_VRCharacter::CharacterSetup_Implementation()
 			SpawnWristMenu();
 		}
     }
+
+    RightMotionController->OnGrippedObject.AddDynamic(this, &AxREAL_VRCharacter::OnRightMotionControllerGripped);
+    LeftMotionController->OnGrippedObject.AddDynamic(this, &AxREAL_VRCharacter::OnLeftMotionControllerGripped);
+
 }
 
 void AxREAL_VRCharacter::SetupMotionControllers_Implementation()
@@ -1025,8 +1003,16 @@ void AxREAL_VRCharacter::SetupMotionControllers_Implementation()
     TeleportControllerRight->OwningMotionController = RightMotionController;
     TeleportControllerRight->AttachToComponent(GetCapsuleComponent(), FAttachmentTransformRules::SnapToTargetIncludingScale);
 
-    InitTeleportControllers_Event();
-    CheckSpawnGraspingHands();
+    // Pass the teleport controllers to the teleport component
+    if (TeleportComponent)
+        TeleportComponent->SetTeleportControllers(TeleportControllerLeft, TeleportControllerRight);
+
+    LoopTryInitTeleportControllers();
+
+    if (SpawnGraspingHands)
+        CheckSpawnGraspingHands();
+    else
+        ClearGraspingHands();
 }
 
 bool AxREAL_VRCharacter::IsALocalGrip(EGripMovementReplicationSettings GripRepType)
@@ -1361,7 +1347,14 @@ void AxREAL_VRCharacter::OnClimbingSteppedUp_Implementation()
     if (IsLocallyControlled())
     {
         ClearClimbing(true);
-        UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0)->StartCameraFade(1.0f, 0.0f, 0.75f, TeleportFadeColor);
+        if (TeleportComponent)
+        {
+            APlayerCameraManager* cameraManager = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0);
+            if (cameraManager)
+            {
+                cameraManager->StartCameraFade(1.0f, 0.0f, 0.75f, FLinearColor::Black);
+            }
+        }
     }
 }
 
@@ -1665,6 +1658,9 @@ bool AxREAL_VRCharacter::IfOverWidgetUse(UGripMotionControllerComponent *Calling
                 return TeleportControllerRight->IfOverWidget_Use(Pressed);
             }
             break;
+
+        default:
+            break;
     }
     return false;
 }
@@ -1785,111 +1781,29 @@ void AxREAL_VRCharacter::SetWristMenuEnabled(bool bEnabled)
 
 void AxREAL_VRCharacter::SetTeleporterActive(EControllerHand Hand, bool Active)
 {
-    switch (Hand)
-    {
-    case EControllerHand::Left:
-        if (IsValid(TeleportControllerLeft)) 
-        {
-            Active?TeleportControllerLeft->ActivateTeleporter():TeleportControllerLeft->DisableTeleporter();
-            NotifyTeleportActive_Server(Hand, Active);
-        }
-        break;
-    
-    case EControllerHand::Right:
-        if (IsValid(TeleportControllerRight))
-        {
-            Active?TeleportControllerRight->ActivateTeleporter():TeleportControllerRight->DisableTeleporter();
-            NotifyTeleportActive_Server(Hand, Active);
-        }
-        break;
-    }
-}
-
-void AxREAL_VRCharacter::NotifyTeleportActive_Server_Implementation(EControllerHand Hand, bool State)
-{
-    TeleportActive_Multicast(Hand, State);
-}
-
-void AxREAL_VRCharacter::TeleportActive_Multicast_Implementation(EControllerHand Hand, bool State)
-{
-    if (!IsLocallyControlled())
-    {
-        switch (Hand)
-        {
-        case EControllerHand::Left:
-            State?TeleportControllerLeft->ActivateTeleporter():TeleportControllerLeft->DisableTeleporter();
-            break;
-        case EControllerHand::Right:
-            State?TeleportControllerRight->ActivateTeleporter():TeleportControllerRight->DisableTeleporter();
-            break;
-        }
-    }
-}
-
-void AxREAL_VRCharacter::ExecuteTeleportation(ATeleportController* MotionController, EVRMovementMode MovementMode, EControllerHand Hand)
-{
-    // Early return if already teleporting
-    if (IsTeleporting)
+    if (!TeleportComponent)
         return;
 
-    switch (MovementMode)
-    {
-        case EVRMovementMode::Teleport:
-            VRMovementReference->StopMovementImmediately();
-            if (MotionController->IsValidTeleportDestination)
-            {
-                IsTeleporting = true;
-                APlayerCameraManager* cameraManager = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0);
-                cameraManager->StartCameraFade(0.0f, 1.0f, FadeOutDuration, TeleportFadeColor, false, true);
-                FVector teleportLocation, finalTeleportLocation;
-                FRotator teleportRotation, finalTeleportRotation;
-                MotionController->GetTeleportDestination(false, teleportLocation, teleportRotation);
-                teleportLocation = GetTeleportLocation(teleportLocation); // Includes the neck offset
-                GetCharacterRotatedPosition(teleportLocation, teleportRotation, GetVRLocation(), finalTeleportRotation, finalTeleportLocation);
-                // Timer
-                GetWorldTimerManager().SetTimer(TeleportFade_TimerHandle, FTimerDelegate::CreateLambda([cameraManager, Hand, finalTeleportLocation, finalTeleportRotation, this]() {
-                    SetTeleporterActive(Hand, false);
-                    VRMovementReference->PerformMoveAction_Teleport(finalTeleportLocation, finalTeleportRotation);
-                    cameraManager->StartCameraFade(1.0f, 0.0f, FadeinDuration, TeleportFadeColor, false, false);
-                    IsTeleporting = false;
-                }), FadeOutDuration, false);
-                
-            }
-            else
-            {
-                SetTeleporterActive(Hand, false);
-            }
-            break;
-
-        case EVRMovementMode::Navigate:
-        case EVRMovementMode::OutOfBodyNavigation:
-            if (!IsHandClimbing)
-            {
-                if (MovementMode == EVRMovementMode::OutOfBodyNavigation)
-                {
-                    SwitchOutOfBodyCamera(true);
-                }
-                
-                FVector teleportLocation;
-                FRotator teleportRotation;
-                MotionController->GetTeleportDestination(false, teleportLocation, teleportRotation);
-                ExtendedSimpleMoveToLocation(teleportLocation);
-                SetTeleporterActive(Hand, false);
-            }
-            break;
-    }
+    TeleportComponent->SetTeleporterActive(Hand, Active);
 }
 
 void AxREAL_VRCharacter::NavigationMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult &Result)
 {
     Super::NavigationMoveCompleted(RequestID, Result);
-    if (bIsOutOfBody)
+    if (bIsOutOfBody && TeleportComponent)
     {
-        UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0)->StartCameraFade(0.0f, 1.0f, FadeOutDuration, TeleportFadeColor, false, true);
-        GetWorldTimerManager().SetTimer(NavigationFinishedTeleportFade_TimerHandle, FTimerDelegate::CreateLambda([this]() {
-            UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0)->StartCameraFade(1.0f, 0.0f, FadeinDuration, TeleportFadeColor, false, false);
-            SwitchOutOfBodyCamera(false);
-        }), FadeOutDuration, false);
+        APlayerCameraManager* cameraManager = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0);
+        if (cameraManager)
+        {
+            cameraManager->StartCameraFade(0.0f, 1.0f, FadeOutDuration, FLinearColor::Black, false, true);
+            GetWorldTimerManager().SetTimer(NavigationFinishedTeleportFade_TimerHandle, FTimerDelegate::CreateLambda([this, cameraManager]() {
+                if (cameraManager)
+                {
+                    cameraManager->StartCameraFade(1.0f, 0.0f, FadeinDuration, FLinearColor::Black, false, false);
+                }
+                SwitchOutOfBodyCamera(false);
+            }), FadeOutDuration, false);
+        }
     }
 }
 
@@ -1957,51 +1871,6 @@ void AxREAL_VRCharacter::CalcPadRotationAndMagnitude(float YAxis, float XAxis, f
     WasValid = FMath::Abs(YAxis) + FMath::Abs(XAxis) > OptionalDeadzone;
     Rotation = UKismetMathLibrary::MakeRotFromX(FVector(YAxis, XAxis, 0.0f));
     Magnitude = FMath::Clamp(FMath::Max(FMath::Abs(YAxis*OptMagnitudeScaler), FMath::Abs(XAxis*OptMagnitudeScaler)), 0.0f, 1.0f);
-}
-
-void AxREAL_VRCharacter::UpdateTeleportRotations()
-{
-    // Right Controller
-    if (IsValid(TeleportControllerRight) && TeleportControllerRight->IsTeleporterActive)
-    {
-        if (bTeleportUsesThumbRotation)
-        {
-            FRotator teleportRotation;
-            float magnitude;
-            bool isValid;
-            CalcPadRotationAndMagnitude(MotionControllerThumbRight_Y_Value, MotionControllerThumbRight_X_Value, 1.0f, TeleportThumbDeadzone, teleportRotation, magnitude, isValid);
-            if (isValid)
-            {
-                TeleportControllerRight->TeleportRotation = teleportRotation;
-            }
-        }
-        else
-        {
-            TeleportControllerRight->TeleportRotation = FRotator(0.0f, 0.0f, 0.0f);
-        }
-        TeleportControllerRight->TeleportBaseRotation = GetVRRotation();
-    }
-
-    // Left Controller
-    if (IsValid(TeleportControllerLeft) && TeleportControllerLeft->IsTeleporterActive)
-    {
-        if (bTeleportUsesThumbRotation)
-        {
-            FRotator teleportRotation;
-            float magnitude;
-            bool isValid;
-            CalcPadRotationAndMagnitude(MotionControllerThumbLeft_Y_Value, MotionControllerThumbLeft_X_Value, 1.0f, TeleportThumbDeadzone, teleportRotation, magnitude, isValid);
-            if (isValid)
-            {
-                TeleportControllerLeft->TeleportRotation = teleportRotation;
-            }
-        }
-        else
-        {
-            TeleportControllerLeft->TeleportRotation = FRotator(0.0f, 0.0f, 0.0f);
-        }
-        TeleportControllerLeft->TeleportBaseRotation = GetVRRotation();
-    }
 }
 
 void AxREAL_VRCharacter::GetCharacterRotatedPosition(FVector OriginalLocation, FRotator DeltaRotation, FVector PivotPoint, FRotator &OutRotation, FVector &OutNewPosition)
@@ -2129,6 +1998,8 @@ void AxREAL_VRCharacter::GetCorrectPrimarySlotPrefix(UObject* ObjectToCheckForTa
                 case EControllerHand::Right:
                     SocketPrefix = FName(localBasePrefix + TEXT("VRGripRP"));
                     return;
+                default:
+                    break;
             }
         }
     }
@@ -2774,49 +2645,42 @@ void AxREAL_VRCharacter::GetThrowingVelocity(UGripMotionControllerComponent *Thr
 
 void AxREAL_VRCharacter::CheckSpawnGraspingHands()
 {
-    if (SpawnGraspingHands)
+    if (HasAuthority())
     {
-        if (HasAuthority())
-        {
-            // Clear the grasping hands so we can re-init them
-            ClearGraspingHands();
+        // Clear the grasping hands so we can re-init them
+        ClearGraspingHands();
 
-            FActorSpawnParameters spawnParams = FActorSpawnParameters();
-            spawnParams.Owner = this;
-            spawnParams.Instigator = this;
-            spawnParams.TransformScaleMethod = ESpawnActorScaleMethod::MultiplyWithRoot;
+        FActorSpawnParameters spawnParams = FActorSpawnParameters();
+        spawnParams.Owner = this;
+        spawnParams.Instigator = this;
+        spawnParams.TransformScaleMethod = ESpawnActorScaleMethod::MultiplyWithRoot;
 
-            GraspingHandRight = GetWorld()->SpawnActor<AGraspingHandManny>(AGraspingHandManny::StaticClass(), HandMesh_Right->GetComponentTransform(), spawnParams);
-            GraspingHandRight->OwningController = RightMotionController;
-            GraspingHandRight->PhysicsRoot = UsePhysicalGraspingHands?GrabSphereRight:nullptr;
-            GraspingHandRight->OtherController = LeftMotionController;
-            GraspingHandRight->UseCurls = GraspingHandsUseFingerCurls;
-            GraspingHandRight->AttachToComponent(RightMotionController, FAttachmentTransformRules::KeepWorldTransform);
-            HandMesh_Right->SetHiddenInGame(true);
-            GrabSphereRight->SetHiddenInGame(true);
+        GraspingHandRight = GetWorld()->SpawnActor<AGraspingHandManny>(AGraspingHandManny::StaticClass(), HandMesh_Right->GetComponentTransform(), spawnParams);
+        GraspingHandRight->OwningController = RightMotionController;
+        GraspingHandRight->PhysicsRoot = UsePhysicalGraspingHands?GrabSphereRight:nullptr;
+        GraspingHandRight->OtherController = LeftMotionController;
+        GraspingHandRight->UseCurls = GraspingHandsUseFingerCurls;
+        GraspingHandRight->AttachToComponent(RightMotionController, FAttachmentTransformRules::KeepWorldTransform);
+        HandMesh_Right->SetHiddenInGame(true);
+        GrabSphereRight->SetHiddenInGame(true);
 
-            GraspingHandLeft = GetWorld()->SpawnActor<AGraspingHandManny>(AGraspingHandManny::StaticClass(), HandMesh_Left->GetComponentTransform(), spawnParams);
-            GraspingHandLeft->OwningController = LeftMotionController;
-            GraspingHandLeft->PhysicsRoot = UsePhysicalGraspingHands?GrabSphereLeft:nullptr;
-            GraspingHandLeft->OtherController = RightMotionController;
-            GraspingHandLeft->UseCurls = GraspingHandsUseFingerCurls;
-            GraspingHandLeft->AttachToComponent(LeftMotionController, FAttachmentTransformRules::KeepWorldTransform);
-            HandMesh_Left->SetHiddenInGame(true);
-            GrabSphereLeft->SetHiddenInGame(true);
+        GraspingHandLeft = GetWorld()->SpawnActor<AGraspingHandManny>(AGraspingHandManny::StaticClass(), HandMesh_Left->GetComponentTransform(), spawnParams);
+        GraspingHandLeft->OwningController = LeftMotionController;
+        GraspingHandLeft->PhysicsRoot = UsePhysicalGraspingHands?GrabSphereLeft:nullptr;
+        GraspingHandLeft->OtherController = RightMotionController;
+        GraspingHandLeft->UseCurls = GraspingHandsUseFingerCurls;
+        GraspingHandLeft->AttachToComponent(LeftMotionController, FAttachmentTransformRules::KeepWorldTransform);
+        HandMesh_Left->SetHiddenInGame(true);
+        GrabSphereLeft->SetHiddenInGame(true);
 
-        }
-        else
-        {
-            GrabSphereRight->SetHiddenInGame(true);
-            HandMesh_Right->SetHiddenInGame(true);
-            GrabSphereLeft->SetHiddenInGame(true);
-            HandMesh_Left->SetHiddenInGame(true);
-            return;
-        }
     }
     else
     {
-        ClearGraspingHands();
+        GrabSphereRight->SetHiddenInGame(true);
+        HandMesh_Right->SetHiddenInGame(true);
+        GrabSphereLeft->SetHiddenInGame(true);
+        HandMesh_Left->SetHiddenInGame(true);
+        return;
     }
 }
 
@@ -2873,6 +2737,39 @@ void AxREAL_VRCharacter::ShouldSocketGrip(UPARAM(ref) FBPActorGripInformation& G
     }
 }
 
+void AxREAL_VRCharacter::LoopTryInitTeleportControllers_Implementation()
+{
+    if (HasAuthority())
+    {
+        if (IsValid(GetPlayerState()))
+        {
+            InitTeleportControllers(GetPlayerState());
+        }
+        else
+        {
+            GetWorldTimerManager().SetTimer(InitTeleportControllers_TimerHandle, FTimerDelegate::CreateLambda([this]() {
+                if (IsValid(GetPlayerState()))
+                {
+                    InitTeleportControllers(GetPlayerState());
+                    GetWorldTimerManager().ClearTimer(InitTeleportControllers_TimerHandle);
+                }
+            }), 0.1f, true);
+        }
+    }
+    else
+    {
+        if (IsValid(GetPlayerState()))
+        {
+            InitTeleportControllers(GetPlayerState());
+        }
+        else
+        {
+            // Bind event to on player state replicated
+            OnPlayerStateReplicated_Bind.AddDynamic(this, &AxREAL_VRCharacter::OnPlayerStateReplicated);
+        }
+    }
+}
+
 void AxREAL_VRCharacter::InitTeleportControllers_Implementation(const APlayerState* ValidPlayerState)
 {
     if (ValidPlayerState != nullptr)
@@ -2882,6 +2779,7 @@ void AxREAL_VRCharacter::InitTeleportControllers_Implementation(const APlayerSta
 
         if (!IsLocallyControlled())
         {
+            // TODO: Move VOIP init out of this function
             if (AttenuationSettingsForVOIP)
             {
                 FVoiceSettings VOIPTalkerSettings = FVoiceSettings();

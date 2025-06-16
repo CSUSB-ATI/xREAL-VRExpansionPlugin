@@ -6,6 +6,7 @@
 #include "EnhancedInputComponent.h"
 #include "VRRootComponent.h"
 #include "WristMenuActor.h"
+#include "TeleportComponent.h"
 #include "PlayerMappableInputConfig.h"
 
 
@@ -47,6 +48,12 @@ void AxREAL_FPS_VRCharacter::BeginPlay()
 		if (!HasAuthority())
 			MoveLaserSpline();
 		}), 0.01f, false);
+
+    if (TeleportComponent)
+    {
+        TeleportComponent->SetControllerRotationOffset(EControllerHand::Left, FRotator(-70.0, 0, 0));
+        TeleportComponent->SetControllerRotationOffset(EControllerHand::Right, FRotator(-70.0, 0, 0));
+    }
 }
 
 void AxREAL_FPS_VRCharacter::Tick(float DeltaTime)
