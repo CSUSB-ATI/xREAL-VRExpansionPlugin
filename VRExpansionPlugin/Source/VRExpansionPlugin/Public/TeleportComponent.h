@@ -32,6 +32,8 @@ public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    AxREAL_VRCharacter* GetOwningVRCharacter();
+
     void SetTeleportControllers(ATeleportController* _TeleportControllerLeft, ATeleportController* _TeleportControllerRight);
 
     /** Called every frame by owning character to adjust thumb‐stick rotation on active teleporter(s) */
@@ -92,7 +94,9 @@ private:
     FLinearColor TeleportFadeColor;
 
     // Cached reference to owning character's movement interface (if needed for immediate stop):
-    class UVRBaseCharacterMovementComponent* VRMovementReference;
+    UPROPERTY()
+    TObjectPtr<class UVRBaseCharacterMovementComponent> VRMovementReference;
 
-    class AxREAL_VRCharacter* OwningVRCharacter;
+    UPROPERTY()
+    TObjectPtr<class AxREAL_VRCharacter> OwningVRCharacter;
 };
