@@ -7,6 +7,9 @@
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/Texture2D.h"
+#include "TextureResource.h"
+#include "CanvasTypes.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Engine/CanvasRenderTarget2D.h"
@@ -296,7 +299,7 @@ void UVRRenderTargetManager::DrawOperations()
 		RenderTargetResource,
 		nullptr,
 		World,
-		World->FeatureLevel);
+		World->GetFeatureLevel());
 
 	// Setup the canvas with the FCanvas reference
 	CanvasToUse->Init(RenderTarget->SizeX, RenderTarget->SizeY, nullptr, &RenderCanvas);
@@ -720,7 +723,7 @@ bool UVRRenderTargetManager::DeCompressRenderTarget2D()
 		RenderTargetResource,
 		nullptr,
 		World,
-		World->FeatureLevel);
+		World->GetFeatureLevel());
 
 	// Setup the canvas with the FCanvas reference
 	CanvasToUse->Init(RenderTarget->SizeX, RenderTarget->SizeY, nullptr, &RenderCanvas);
@@ -1466,6 +1469,7 @@ void RLE_Funcs::RLEWriteRunFlag(uint32 count, uint8** loc, TArray<DataType>& Dat
 	Data.Empty(256);
 }
 
+
 template <typename DataType>
 bool RLE_Funcs::RLEEncodeBuffer(DataType* BufferToEncode, uint32 EncodeLength, TArray<uint8>* EncodedLine)
 {
@@ -1633,15 +1637,17 @@ bool RLE_Funcs::RLEEncodeBuffer(DataType* BufferToEncode, uint32 EncodeLength, T
 
 	return true;
 	// Skipping non compressed for now, the overhead is so low that it isn't worth supporting since the last revision
+	/*
 	if (Wrote > OrigNum * incr)
 	{
 		EncodedLine->Empty(OrigNum * incr);
 		EncodedLine->AddUninitialized(OrigNum * incr);
-		FMemory::Memcpy(EncodedLine->GetData(), BufferToEncode/*LineToEncode->GetData()*/, OrigNum * incr);
+		FMemory::Memcpy(EncodedLine->GetData(), BufferToEncode, OrigNum * incr);
 		return false; // Return that there was no compression, so the decoder can receive it later
 	}
 	else
 		return true;
+		*/
 }
 
 template<int32 ScaleFactor, int32 MaxBitsPerComponent>

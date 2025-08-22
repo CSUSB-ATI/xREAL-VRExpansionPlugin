@@ -169,6 +169,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GripMotionController|Advanced")
 		bool bProjectNonSimulatingGrips;
 
+	// If true then we will sweep grip teleport operations so that they stop when they will be colliding with something.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GripMotionController|Advanced")
+		bool bSweepGripTeleports = false;
+
 
 	// The grip script that defines the default behaviors of grips
 	// Don't edit this unless you really know what you are doing, leave it empty
@@ -182,7 +186,7 @@ public:
 		TObjectPtr<UVRGripScriptBase> DefaultGripScript;
 
 	// This is a pointer to be able to access the display component directly in c++
-	TWeakObjectPtr<const UPrimitiveComponent> DisplayComponentReference;
+	//TWeakObjectPtr<const UPrimitiveComponent> DisplayComponentReference;
 
 	// Lerping functions and events
 	void InitializeLerpToHand(FBPActorGripInformation& GripInfo);
@@ -223,8 +227,8 @@ public:
 		float MaximumHeight;
 
 	// If true will subtract the HMD's location from the position, useful for if the actors base is set to the HMD location always (simple character).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GripMotionController|Advanced|Tracking")
-	bool bOffsetByHMD;
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GripMotionController|Advanced|Tracking")
+	//bool bOffsetByHMD;
 
 	// If true this controller will attempt to stay within its LeashRange distance from the HMD
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GripMotionController|Advanced|Tracking")
@@ -334,9 +338,9 @@ protected:
 	
 	void OnModularFeatureUnregistered(const FName& Type, class IModularFeature* ModularFeature);
 
-	IMotionController* GripPolledMotionController_GameThread;
-	IMotionController* GripPolledMotionController_RenderThread;
-	FCriticalSection GripPolledMotionControllerMutex;
+	//IMotionController* GripPolledMotionController_GameThread;
+	//IMotionController* GripPolledMotionController_RenderThread;
+	//FCriticalSection GripPolledMotionControllerMutex;
 
 	// Late update control variables (should likely struct these soon)
 	struct FRenderTrackingParams
@@ -524,7 +528,7 @@ public:
 	// Notify change on relative position editing as well, make RPCS callable in blueprint
 	// Notify the server that we locally gripped something
 	UFUNCTION(Reliable, Server, WithValidation)
-	void Server_NotifyLocalGripRemoved(uint8 GripID, const FTransform_NetQuantize &TransformAtDrop, FVector_NetQuantize100 AngularVelocity, FVector_NetQuantize100 LinearVelocity);
+	void Server_NotifyLocalGripRemoved(uint8 GripID, const FTransform_NetQuantize &TransformAtDrop, FVector_NetQuantize100 OptAngularVelocity, FVector_NetQuantize100 OptLinearVelocity);
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GripMotionController|ClientAuth")
 		EVRClientAuthConflictResolutionMode ClientAuthConflictResolutionMethod;
@@ -894,6 +898,19 @@ public:
 		//return MyPawn ? MyPawn->IsLocallyControlled() : (MyOwner && MyOwner->Role == ENetRole::ROLE_Authority);
 	}
 
+	// Shorthand for checking if we are in seamless travel
+	inline bool IsTravelingOrNullWorld() const
+	{
+		UWorld* myWorld = GetWorld();
+		if (IsValid(myWorld))
+		{
+			return myWorld->IsInSeamlessTravel();
+		}
+
+		// We don't have a valid world we are part of, don't do anything.
+		return true;
+	}
+
 	// Returns if this is the owning connection for the motion controller
 	UFUNCTION(BlueprintPure, Category = "GripMotionController", meta = (DisplayName = "IsLocallyControlled"))
 		bool BP_IsLocallyControlled();
@@ -983,7 +1000,7 @@ public:
 	// If an object is passed in it will attempt to drop it, otherwise it will attempt to find and drop the given grip id
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
 		bool DropObject(
-			UObject * ObjectToDrop = nullptr,
+			UObject* ObjectToDrop = nullptr,
 			uint8 GripIdToDrop = 0,
 			bool bSimulate = false,
 			FVector OptionalAngularVelocity = FVector::ZeroVector,
@@ -991,12 +1008,12 @@ public:
 
 	// Auto grip any uobject that is/root is a primitive component
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
-		bool GripObjectByInterface(UObject * ObjectToGrip, const FTransform &WorldOffset, bool bWorldOffsetIsRelative = false, FName OptionalBoneToGripName = NAME_None, FName OptionalSnapToSocketName = NAME_None, bool bIsSlotGrip = false);
+		bool GripObjectByInterface(UObject* ObjectToGrip, const FTransform &WorldOffset, bool bWorldOffsetIsRelative = false, FName OptionalBoneToGripName = NAME_None, FName OptionalSnapToSocketName = NAME_None, bool bIsSlotGrip = false);
 
 	// Auto drop any uobject that is/root is a primitive component and has the VR Grip Interface
 	// If an object is passed in it will attempt to drop it, otherwise it will attempt to find and drop the given grip id
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
-		bool DropObjectByInterface(UObject * ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector);
+		bool DropObjectByInterface(UObject* ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector);
 
 	bool DropObjectByInterface_Implementation(UObject* ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector, bool bSkipNotify = false);
 
@@ -1108,7 +1125,7 @@ public:
 
 	// Get the physics velocities of a grip
 	UFUNCTION(BlueprintPure, Category = "GripMotionController")
-		void GetPhysicsVelocities(const FBPActorGripInformation &Grip, FVector &AngularVelocity, FVector &LinearVelocity);
+		void GetPhysicsVelocities(const FBPActorGripInformation &Grip, FVector &CurAngularVelocity, FVector &CurLinearVelocity);
 
 	// Get the physics constraint force of a simulating grip
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
@@ -1408,9 +1425,11 @@ public:
 
 	/** If true, the Position and Orientation args will contain the most recent controller state */
 	virtual bool GripPollControllerState(FVector& Position, FRotator& Orientation, float WorldToMetersScale);
+	bool GripPollControllerState_GameThread(FVector& Position, FRotator& Orientation, bool& OutbProvidedLinearVelocity, FVector& OutLinearVelocity, bool& OutbProvidedAngularVelocity, FVector& OutAngularVelocityAsAxisAndLength, bool& OutbProvidedLinearAcceleration, FVector& OutLinearAcceleration, float WorldToMetersScale);
+	bool GripPollControllerState_RenderThread(FVector& Position, FRotator& Orientation, float WorldToMetersScale);
 
 	/** Whether or not this component had a valid tracked controller associated with it this frame*/
-	bool bTracked;
+	//bool bTracked;
 
 	/** Whether or not this component had a valid tracked device this frame
 	*
@@ -1427,11 +1446,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController", meta = (ExpandEnumAsExecs = "Result"))
 		void GetControllerDeviceID(FXRDeviceId & DeviceID, EBPVRResultSwitch &Result, bool bCheckOpenVROnly = false);
 
+	// Return whether this controller has authority (is locally net owned)
+	UFUNCTION(BlueprintPure, Category = "GripMotionController")
+		bool HasAuthority() const;
+
 	/** Whether or not this component has authority within the frame*/
-	bool bHasAuthority;
+	//bool bHasAuthority;
 
 	/** Whether or not this component has informed the visualization component (if present) to start rendering */
-	bool bHasStartedRendering = false;
+	//bool bHasStartedRendering = false;
 
 private:
 	/** Whether or not this component is currently on the network server*/

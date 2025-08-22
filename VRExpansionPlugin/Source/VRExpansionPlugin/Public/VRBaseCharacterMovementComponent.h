@@ -65,6 +65,32 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRMovement")
 		bool bCapHMDMovementToMaxMovementSpeed;
 
+	// If true then when in walking mode the character will attempt to automatically orient itself to the normal of the floor it is standing on
+	// Both the rotation and gravity vector will be effected.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRMovement|Wall Walking")
+		bool bAutoOrientToFloorNormal = false;
+
+	// If true then we will attempt to blend all gravity based floor changes as long as they are within the max walking angle of the CMC
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRMovement|Wall Walking")
+		bool bBlendGravityFloorChanges = true;
+
+	// The rate at which we will blend the change in rotation for wall walking
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRMovement|Wall Walking")
+		float FloorOrientationChangeBlendRate = 25.0f;
+
+	// Sets the value of bAutoOrientToFloorNormal in a manner that cleans up when removed
+	UFUNCTION(BlueprintCallable, Category = "BaseVRCharacterMovementComponent|Wall Walking")
+		void SetAutoOrientToFloorNormal(bool bAutoOrient, bool bRevertGravityWhenDisabled = true);
+
+	// Store if our current movement was blending rotation
+	bool bIsBlendingOrientation = false;
+
+	void AutoTraceAndSetCharacterToNewGravity(FHitResult & TargetFloor, float DeltaTime = 1.0f);
+
+	// Directly set new gravity (does not replicate, move action is preferrable) 
+	UFUNCTION(BlueprintCallable, Category = "BaseVRCharacterMovementComponent|Wall Walking")
+	bool SetCharacterToNewGravity(FVector NewGravityDirection, bool bOrientToNewGravity = true, float Deltatime = 1.0f);
+
 	// Adding seated transition
 	void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 
@@ -133,6 +159,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "VRMovement")
 		void PerformMoveAction_StopAllMovement();
 	
+	// Set the gravity direction for the character manually (optionall auto align to the new gravity)
+	UFUNCTION(BlueprintCallable, Category = "VRMovement")
+		void PerformMoveAction_SetGravityDirection(FVector NewGravityDirection, bool bOrientToNewGravity);
+
 	// Perform a custom moveaction that you define, will call the OnCustomMoveActionPerformed event in the character when processed so you can run your own logic
 	// Be sure to set the minimum data replication requirements for your move action in order to save on replication.
 	// Flags will always replicate if it is non zero
@@ -148,6 +178,7 @@ public:
 	virtual bool DoMASetRotation(FVRMoveActionContainer& MoveAction);
 	virtual bool DoMATeleport(FVRMoveActionContainer& MoveAction);
 	virtual bool DoMAStopAllMovement(FVRMoveActionContainer& MoveAction);
+	virtual bool DoMASetGravityDirection(FVRMoveActionContainer& MoveAction);
 	virtual bool DoMAPauseTracking(FVRMoveActionContainer& MoveAction);
 
 	FVector CustomVRInputVector;
@@ -259,7 +290,7 @@ public:
 	virtual void PhysCustom_LowGrav(float deltaTime, int32 Iterations);
 
 	// Teleport grips on correction to fixup issues
-	virtual void OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData, float TimeStamp, FVector NewLocation, FVector NewVelocity, UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase, bool bBaseRelativePosition, uint8 ServerMovementMode) override;
+	virtual void OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData, float TimeStamp, FVector NewLocation, FVector NewVelocity, UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase, bool bBaseRelativePosition, uint8 ServerMovementMode, FVector ServerGravityDirection) override;
 
 	// Fix network smoothing with our default mesh back in
 	virtual void SimulatedTick(float DeltaSeconds) override;
@@ -292,17 +323,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRMovement")
 		bool bRunControlRotationInMovementComponent;
 
-	// Moved into compute floor dist
-	// Option to Skip simulating components when looking for floor
-	/*virtual bool FloorSweepTest(
+	// They have gravity checks incorrect in here so having to override it again
+	virtual bool FloorSweepTest(
+		struct FHitResult& OutHit,
 		const FVector& Start,
-		FHitResult& OutHit,
 		const FVector& End,
 		ECollisionChannel TraceChannel,
 		const struct FCollisionShape& CollisionShape,
 		const struct FCollisionQueryParams& Params,
 		const struct FCollisionResponseParams& ResponseParam
-	) const override;*/
+	) const override;
 
 	virtual void ComputeFloorDist(const FVector& CapsuleLocation, float LineDistance, float SweepDistance, FFindFloorResult& OutFloorResult, float SweepRadius, const FHitResult* DownwardSweepResult = NULL) const override;
 

@@ -21,7 +21,8 @@ enum class EVRMoveAction : uint8
 	VRMOVEACTION_Teleport = 0x02,
 	VRMOVEACTION_StopAllMovement = 0x03,
 	VRMOVEACTION_SetRotation = 0x04,
-	VRMOVEACTION_PauseTracking = 0x14, // Reserved from here up to 0x40
+	VRMOVEACTION_PauseTracking = 0x14,
+	VRMOVEACTION_SetGravityDirection = 0x15, // Reserved from here up to 0x40
 	VRMOVEACTION_CUSTOM1 = 0x05,
 	VRMOVEACTION_CUSTOM2 = 0x06,
 	VRMOVEACTION_CUSTOM3 = 0x07,
@@ -83,6 +84,8 @@ public:
 	UPROPERTY()
 		FRotator MoveActionRot;
 	UPROPERTY()
+		float MoveActionDeltaYaw;
+	UPROPERTY()
 		uint8 MoveActionFlags;
 	UPROPERTY()
 		TArray<UObject*> MoveActionObjectReferences;
@@ -101,6 +104,7 @@ public:
 		MoveActionLoc = FVector::ZeroVector;
 		MoveActionVel = FVector::ZeroVector;
 		MoveActionRot = FRotator::ZeroRotator;
+		MoveActionDeltaYaw = 0.0f;
 		MoveActionFlags = 0;
 		VelRetentionSetting = EVRMoveActionVelocityRetention::VRMOVEACTION_Velocity_None;
 		MoveActionObjectReferences.Empty();
@@ -130,8 +134,9 @@ public:
 
 				if (!bUseLocOnly)
 				{
-					Yaw = FRotator::CompressAxisToShort(MoveActionRot.Yaw);
-					Ar << Yaw;
+					//Yaw = FRotator::CompressAxisToShort(MoveActionRot.Yaw);
+					//Ar << Yaw;
+					Ar << MoveActionRot;
 				}
 				else
 				{
@@ -152,9 +157,11 @@ public:
 				if (VelRetentionSetting == EVRMoveActionVelocityRetention::VRMOVEACTION_Velocity_Turn)
 				{
 					bOutSuccess &= SerializePackedVector<100, 30>(MoveActionVel, Ar);
-					//Pitch = FRotator::CompressAxisToShort(MoveActionRot.Pitch);
-					//Ar << Pitch;
 				}
+
+				// Always send this in case we are sitting
+				Pitch = FRotator::CompressAxisToShort(MoveActionDeltaYaw);
+				Ar << Pitch;
 
 				bool bRotateAroundCapsule = MoveActionFlags & 0x08;
 				Ar.SerializeBits(&bRotateAroundCapsule, 1);
@@ -168,8 +175,9 @@ public:
 
 				if (!bUseLocOnly)
 				{
-					Ar << Yaw;
-					MoveActionRot.Yaw = FRotator::DecompressAxisFromShort(Yaw);
+					//Ar << Yaw;
+					//MoveActionRot.Yaw = FRotator::DecompressAxisFromShort(Yaw);
+					Ar << MoveActionRot;
 				}
 				else
 				{
@@ -193,9 +201,10 @@ public:
 				if (VelRetentionSetting == EVRMoveActionVelocityRetention::VRMOVEACTION_Velocity_Turn)
 				{
 					bOutSuccess &= SerializePackedVector<100, 30>(MoveActionVel, Ar);
-					//Ar << Pitch;
-					//MoveActionRot.Pitch = FRotator::DecompressAxisFromShort(Pitch);
 				}
+
+				Ar << Pitch;
+				MoveActionDeltaYaw = FRotator::DecompressAxisFromShort(Pitch);
 
 				bool bRotateAroundCapsule = false;
 				Ar.SerializeBits(&bRotateAroundCapsule, 1);
@@ -248,6 +257,22 @@ public:
 		}break;
 		case EVRMoveAction::VRMOVEACTION_StopAllMovement:
 		{}break;
+		case EVRMoveAction::VRMOVEACTION_SetGravityDirection:
+		{
+			bOutSuccess = SerializeFixedVector<1, 16>(MoveActionVel, Ar);
+			if (Ar.IsSaving())
+			{
+				bool bOrientToGravity = MoveActionFlags > 0;
+				Ar.SerializeBits(&bOrientToGravity, 1);
+			}
+			else
+			{
+				bool bOrientToGravity = false;
+				Ar.SerializeBits(&bOrientToGravity, 1);
+				MoveActionFlags |= (uint8)bOrientToGravity;
+			}
+
+		}break;
 		case EVRMoveAction::VRMOVEACTION_PauseTracking:
 		{
 
@@ -315,6 +340,23 @@ struct VREXPANSIONPLUGIN_API FVRMoveActionArray
 public:
 	UPROPERTY()
 		TArray<FVRMoveActionContainer> MoveActions;
+
+	bool CanCombine() const 
+	{
+		return !MoveActions.Num();
+		/*if (!MoveActions.Num())
+		{
+			return true;
+		}
+
+		for (const FVRMoveActionContainer& MoveAction : MoveActions)
+		{
+			if (MoveAction.MoveAction != EVRMoveAction::VRMOVEACTION_SnapTurn)
+				return false;
+		}
+
+		return true;*/
+	}
 
 	void Clear()
 	{
@@ -594,6 +636,7 @@ public:
 	FVector VRCapsuleLocation;
 	FVector LFDiff;
 	FRotator VRCapsuleRotation;
+	float CapsuleHeight;
 	FVRConditionalMoveRep ConditionalValues;
 
 	void Clear();
@@ -633,6 +676,7 @@ public:
 
 	FVector_NetQuantize100 VRCapsuleLocation;
 	FVector/*_NetQuantize100*/ LFDiff;
+	float CapsuleHeight;
 	uint16 VRCapsuleRotation;
 	EVRConjoinedMovementModes ReplicatedMovementMode;
 	FVRConditionalMoveRep ConditionalMoveReps;

@@ -161,13 +161,13 @@ void AGrippableStaticMeshActor::PreReplication(IRepChangedPropertyTracker & Chan
 	}
 #endif
 
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	/*PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	UBlueprintGeneratedClass* BPClass = Cast<UBlueprintGeneratedClass>(GetClass());
 	if (BPClass != nullptr)
 	{
 		BPClass->InstancePreReplication(this, ChangedPropertyTracker);
 	}
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS*/
 
 }
 
@@ -196,9 +196,10 @@ void AGrippableStaticMeshActor::GatherCurrentMovement()
 			bool bFoundInCache = false;
 
 			UWorld* World = GetWorld();
+			int ServerFrame = 0;
 			if (FPhysScene_Chaos* Scene = static_cast<FPhysScene_Chaos*>(World->GetPhysicsScene()))
 			{
-				if (FRigidBodyState* FoundState = Scene->ReplicationCache.Map.Find(FObjectKey(RootPrimComp)))
+				if (const FRigidBodyState* FoundState = Scene->GetStateFromReplicationCache(RootPrimComp, ServerFrame))
 				{
 					RepMovement.FillFrom(*FoundState, this, Scene->ReplicationCache.ServerFrame);
 					bFoundInCache = true;
@@ -305,7 +306,7 @@ bool AGrippableStaticMeshActor::ReplicateSubobjects(UActorChannel* Channel, clas
 {
 	bool WroteSomething = Super::ReplicateSubobjects(Channel, Bunch, RepFlags);
 
-	if (bReplicateGripScripts)
+	if (bReplicateGripScripts && !IsUsingRegisteredSubObjectList())
 	{
 		for (UVRGripScriptBase* Script : GripLogicScripts)
 		{
@@ -655,7 +656,7 @@ void AGrippableStaticMeshActor::Server_EndClientAuthReplication_Implementation()
 	{
 		if (FPhysScene* PhysScene = World->GetPhysicsScene())
 		{
-			if (FPhysicsReplication* PhysicsReplication = PhysScene->GetPhysicsReplication())
+			if (IPhysicsReplication* PhysicsReplication = PhysScene->GetPhysicsReplication())
 			{
 				PhysicsReplication->RemoveReplicatedTarget(this->GetStaticMeshComponent());
 			}
@@ -679,6 +680,30 @@ void AGrippableStaticMeshActor::Server_GetClientAuthReplication_Implementation(c
 			OnRep_ReplicatedMovement();
 		}
 	}
+}
+
+bool AGrippableStaticMeshActor::ShouldWeSkipAttachmentReplication(bool bConsiderHeld) const
+{
+	if ((bConsiderHeld && !VRGripInterfaceSettings.bWasHeld) || GetNetMode() < ENetMode::NM_Client)
+		return false;
+
+	if (VRGripInterfaceSettings.MovementReplicationType == EGripMovementReplicationSettings::ClientSide_Authoritive ||
+		VRGripInterfaceSettings.MovementReplicationType == EGripMovementReplicationSettings::ClientSide_Authoritive_NoRep)
+	{
+		// First return if we are locally held (owner may not have replicated yet)
+		for (const FBPGripPair& Grip : VRGripInterfaceSettings.HoldingControllers)
+		{
+			if (IsValid(Grip.HoldingController) && Grip.HoldingController->IsLocallyControlled())
+			{
+				return true;
+			}
+		}
+
+		// then return if we have a local net owner
+		return HasLocalNetOwner();
+	}
+	else
+		return false;
 }
 
 void AGrippableStaticMeshActor::OnRep_AttachmentReplication()
@@ -773,6 +798,12 @@ void AGrippableStaticMeshActor::OnRep_ReplicatedMovement()
 		return;
 	}
 
+	if (VRGripInterfaceSettings.HoldingControllers.Num() > 0)
+	{
+		ShouldWeSkipAttachmentReplication();
+		int gg = 0;
+	}
+
 	Super::OnRep_ReplicatedMovement();
 }
 
@@ -787,9 +818,9 @@ void AGrippableStaticMeshActor::PostNetReceivePhysicState()
 	Super::PostNetReceivePhysicState();
 }
 
-void AGrippableStaticMeshActor::MarkComponentsAsPendingKill()
+void AGrippableStaticMeshActor::MarkComponentsAsGarbage(bool bModify)
 {
-	Super::MarkComponentsAsPendingKill();
+	Super::MarkComponentsAsGarbage(bModify);
 
 	for (int32 i = 0; i < GripLogicScripts.Num(); ++i)
 	{

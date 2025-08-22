@@ -103,7 +103,7 @@ public:
 	UPROPERTY(EditAnywhere, NotReplicated, BlueprintReadWrite, Category = Default)
 		bool bAllowDeformingMesh;
 
-	// If true then the bones will be mirrored from left/right, to allow you to swap a hand mesh or apply to a full body mesh
+	// If true then the bones will be mirrored from left/right, to allow you to swap a hand mesh to the other hand
 	UPROPERTY(EditAnywhere, NotReplicated, BlueprintReadWrite, Category = Default)
 		bool bMirrorLeftRight;
 
@@ -213,6 +213,18 @@ public:
 	bool bInitialized;
 
 	FName LastInitializedName;
+	EVROpenXRSkeletonType LastInitializedSkeleton;
+
+	void ClearMapping()
+	{
+		bInitialized = false;
+		LastInitializedName = NAME_None;
+		AdjustmentQuat = FQuat::Identity;
+		LastInitializedSkeleton = EVROpenXRSkeletonType::OXR_SkeletonType_Custom;
+
+		BonePairs.Empty();
+		ReverseBonePairMap.Empty();
+	}
 
 	void ConstructReverseMapping()
 	{
@@ -462,5 +474,6 @@ public:
 		bMergeMissingBonesUE4 = false;
 		TargetHand = EVRSkeletalHandIndex::EActionHandIndex_Right;
 		LastInitializedName = NAME_None;
+		LastInitializedSkeleton = EVROpenXRSkeletonType::OXR_SkeletonType_Custom;
 	}
 };

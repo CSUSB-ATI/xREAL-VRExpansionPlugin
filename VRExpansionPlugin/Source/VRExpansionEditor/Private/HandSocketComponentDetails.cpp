@@ -95,7 +95,7 @@ TWeakObjectPtr<UAnimSequence> FHandSocketComponentDetails::SaveAnimationAsset(co
 	// if object with same name exists, warn user
 	if (Object)
 	{
-		EAppReturnType::Type ReturnValue = FMessageDialog::Open(EAppMsgType::YesNo, NSLOCTEXT("UnrealEd", "Error_AssetExist", "Asset with same name exists. Do you wish to overwrite it?"));
+		EAppReturnType::Type ReturnValue = FMessageDialog::Open(EAppMsgType::YesNo, LOCTEXT("Error_AssetExist", "Asset with same name exists. Do you wish to overwrite it?"));
 		if (ReturnValue == EAppReturnType::No)
 		{
 			return FinalAnimation; // failed
@@ -107,7 +107,7 @@ TWeakObjectPtr<UAnimSequence> FHandSocketComponentDetails::SaveAnimationAsset(co
 
 	if (!BaseAnimation)
 	{
-		LocalPoses = HandSocketComponent->VisualizationMesh->GetSkeleton()->GetRefLocalPoses();
+		LocalPoses = HandSocketComponent->VisualizationMesh->GetRefSkeleton().GetRefBonePose();
 	}
 
 	// If not, create new one now.
@@ -251,7 +251,7 @@ TWeakObjectPtr<UAnimSequence> FHandSocketComponentDetails::SaveAnimationAsset(co
 						int32 BoneIndex = BoneTreeIndex;//AnimSkeleton->GetMeshBoneIndexFromSkeletonBoneIndex(SkeletalMesh, BoneTreeIndex);
 						//int32 ParentIndex = SkeletalMesh->RefSkeleton.GetParentIndex(BoneIndex);
 						FTransform LocalTransform = LocalPoses[BoneIndex];
-
+						//FTransform LocalTransform = RefSkeleton.GetRefBonePose()[BoneIndex];
 
 						FName BoneName = AnimSkeleton->GetReferenceSkeleton().GetBoneName(BoneIndex);
 
@@ -554,12 +554,12 @@ void FHandSocketComponentDetails::CustomizeDetails(IDetailLayoutBuilder& DetailB
 	ShowVisualizationProperty->SetOnPropertyValueChanged(OnShowVisChangedDelegate);
 
 	DetailBuilder.EditCategory("Hand Animation")
-		.AddCustomRow(NSLOCTEXT("HandSocketDetails", "UpdateHandSocket", "Save Current Pose"))
+		.AddCustomRow(LOCTEXT("UpdateHandSocketRow", "Save Current Pose"))
 		.NameContent()
 		[
 			SNew(STextBlock)
 			.Font(IDetailLayoutBuilder::GetDetailFont())
-		.Text(NSLOCTEXT("HandSocketDetails", "UpdateHandSocket", "Save Current Pose"))
+		.Text(LOCTEXT("UpdateHandSocketText", "Save Current Pose"))
 		]
 	.ValueContent()
 		.MaxDesiredWidth(125.f)
@@ -573,7 +573,7 @@ void FHandSocketComponentDetails::CustomizeDetails(IDetailLayoutBuilder& DetailB
 		[
 			SNew(STextBlock)
 			.Font(IDetailLayoutBuilder::GetDetailFont())
-		.Text(NSLOCTEXT("HandSocketDetails", "UpdateHandSocket", "Save"))
+		.Text(LOCTEXT("UpdateHandSocketButton", "Save"))
 		]
 		];
 }

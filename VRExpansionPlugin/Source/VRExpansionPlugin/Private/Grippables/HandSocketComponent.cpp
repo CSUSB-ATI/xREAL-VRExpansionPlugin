@@ -14,6 +14,7 @@
 #include "GripMotionControllerComponent.h"
 //#include "VRGripInterface.h"
 //#include "VRBPDatatypes.h"
+#include "Engine/SkinnedAssetCommon.h"
 #include "Net/UnrealNetwork.h"
 #include "Serialization/CustomVersion.h"
 
@@ -67,6 +68,7 @@ UHandSocketComponent::UHandSocketComponent(const FObjectInitializer& ObjectIniti
 	HandRelativePlacement = FTransform::Identity;
 	bAlwaysInRange = false;
 	bDisabled = false;
+	bLockInPlace = false;
 	bMatchRotation = false;
 	OverrideDistance = 0.0f;
 	SlotPrefix = FName("VRGripP");
@@ -74,6 +76,7 @@ UHandSocketComponent::UHandSocketComponent(const FObjectInitializer& ObjectIniti
 	HandTargetAnimation = nullptr;
 	MirroredScale = FVector(1.f, 1.f, -1.f);
 	bOnlySnapMesh = false;
+	bOnlyUseHandPose = false;
 	bIgnoreAttachBone = false;
 	bFlipForLeftHand = false;
 	bLeftHandDominant = false;
@@ -86,6 +89,69 @@ UHandSocketComponent::UHandSocketComponent(const FObjectInitializer& ObjectIniti
 UAnimSequence* UHandSocketComponent::GetTargetAnimation()
 {
 	return HandTargetAnimation;
+}
+
+void UHandSocketComponent::GetAllHandSocketComponents(TArray<UHandSocketComponent*>& OutHandSockets)
+{
+	for (TObjectIterator<UHandSocketComponent> It; It; ++It)
+	{
+		UHandSocketComponent* HandSocket = *It;
+		if (IsValid(HandSocket) && !HandSocket->IsTemplate())
+		{
+			OutHandSockets.Add(HandSocket);
+		}
+	}
+}
+
+bool UHandSocketComponent::GetAllHandSocketComponentsInRange(FVector SearchFromWorldLocation, float SearchRange, TArray<UHandSocketComponent*>& OutHandSockets)
+{
+	float SearchDistSq = FMath::Square(SearchRange);
+
+	UHandSocketComponent* HandSocket = nullptr;
+	FTransform HandSocketTrans;
+	for (TObjectIterator<UHandSocketComponent> It; It; ++It)
+	{
+		HandSocket = *It;
+		if (IsValid(HandSocket) && !HandSocket->IsTemplate())
+		{
+			HandSocketTrans = HandSocket->GetRelativeTransform() * HandSocket->GetOwner()->GetActorTransform();
+			if (FVector::DistSquared(HandSocketTrans.GetLocation(), SearchFromWorldLocation) <= SearchDistSq)
+			{
+				OutHandSockets.Add(HandSocket);
+			}
+		}
+	}
+
+	return OutHandSockets.Num() > 0;
+}
+
+UHandSocketComponent* UHandSocketComponent::GetClosestHandSocketComponentInRange(FVector SearchFromWorldLocation, float SearchRange)
+{
+	float SearchDistSq = FMath::Square(SearchRange);
+	UHandSocketComponent* ClosestHandSocket = nullptr;
+	float LastDist = 0.0f;
+	float DistSq = 0.0f;
+
+	bool bFoundOne = false;
+	UHandSocketComponent* HandSocket = nullptr;
+	FTransform HandSocketTrans;
+	for (TObjectIterator<UHandSocketComponent> It; It; ++It)
+	{
+		HandSocket = *It;
+		if (IsValid(HandSocket) && !HandSocket->IsTemplate())
+		{
+			HandSocketTrans = HandSocket->GetRelativeTransform() * HandSocket->GetOwner()->GetActorTransform();
+			DistSq = FVector::DistSquared(HandSocketTrans.GetLocation(), SearchFromWorldLocation);
+			if (DistSq <= SearchDistSq && (!bFoundOne || DistSq < LastDist))
+			{
+				bFoundOne = true;
+				ClosestHandSocket = HandSocket;
+				LastDist = DistSq;
+			}
+		}
+	}
+
+	return ClosestHandSocket;
 }
 
 bool UHandSocketComponent::GetAnimationSequenceAsPoseSnapShot(UAnimSequence* InAnimationSequence, FPoseSnapshot& OutPoseSnapShot, USkeletalMeshComponent* TargetMesh, bool bSkipRootBone, bool bFlipHand)
@@ -322,7 +388,8 @@ bool UHandSocketComponent::GetBlendedPoseSnapShot(FPoseSnapshot& PoseSnapShot, U
 		PoseSnapShot.LocalTransforms.Empty();
 		TargetMesh->GetBoneNames(PoseSnapShot.BoneNames);
 
-		PoseSnapShot.LocalTransforms = TargetMesh->GetSkinnedAsset()->GetSkeleton()->GetRefLocalPoses();
+		//PoseSnapShot.LocalTransforms = TargetMesh->GetSkinnedAsset()->GetSkeleton()->GetRefLocalPoses();
+		PoseSnapShot.LocalTransforms = TargetMesh->GetSkinnedAsset()->GetRefSkeleton().GetRefBonePose();
 
 		FQuat DeltaQuat = FQuat::Identity;
 		FName TargetBoneName = NAME_None;
@@ -442,12 +509,37 @@ FTransform UHandSocketComponent::GetHandSocketTransform(UGripMotionControllerCom
 
 					ReturnTrans = ReturnTrans * AttParent->GetComponentTransform();
 				}
+
 				return ReturnTrans;
 			}
 		}
 	}
 
-	return this->GetComponentTransform();
+
+	if (bLockInPlace)
+	{
+		FTransform ReturnTrans = this->GetRelativeTransform();
+
+		if (USceneComponent* AttParent = this->GetAttachParent())
+		{	
+			if (this->GetAttachSocketName() != NAME_None)
+			{
+				ReturnTrans = ReturnTrans * AttParent->GetSocketTransform(GetAttachSocketName(), RTS_Component);
+			}
+
+			ReturnTrans = ReturnTrans * AttParent->GetComponentTransform();
+		}
+		else
+		{
+			ReturnTrans = this->GetComponentTransform(); // Fallback
+		}
+
+		return ReturnTrans;
+	}
+	else
+	{
+		return this->GetComponentTransform();
+	}
 }
 
 FTransform UHandSocketComponent::GetMeshRelativeTransform(bool bIsRightHand, bool bUseParentScale, bool bUseMirrorScale)
@@ -551,11 +643,19 @@ FTransform UHandSocketComponent::GetBoneTransformAtTime(UAnimSequence* MyAnimSeq
 void UHandSocketComponent::OnRegister()
 {
 
+
+	UWorld* MyWorld = GetWorld();
+
+	if (!MyWorld)
+		return;
+
+	TEnumAsByte<EWorldType::Type> MyWorldType = MyWorld->WorldType;
+
 #if WITH_EDITORONLY_DATA
 	AActor* MyOwner = GetOwner();
 	if (bShowVisualizationMesh && (MyOwner != nullptr) && !IsRunningCommandlet())
 	{
-		if (HandVisualizerComponent == nullptr && bShowVisualizationMesh)
+		if (HandVisualizerComponent == nullptr && bShowVisualizationMesh && (MyWorldType == EWorldType::EditorPreview || MyWorldType == EWorldType::Editor))
 		{
 			HandVisualizerComponent = NewObject<UPoseableMeshComponent>(MyOwner, NAME_None, RF_Transactional | RF_TextExportTransient);
 			HandVisualizerComponent->SetupAttachment(this);
@@ -569,9 +669,11 @@ void UHandSocketComponent::OnRegister()
 			HandVisualizerComponent->RegisterComponentWithWorld(GetWorld());
 			//HandVisualizerComponent->SetUsingAbsoluteScale(true);
 		}
-		else if (!bShowVisualizationMesh && HandVisualizerComponent)
+		else if (/*!bShowVisualizationMesh && */HandVisualizerComponent)
 		{
-			HideVisualizationMesh();
+			HandVisualizerComponent->SetVisibility(false);
+			HandVisualizerComponent->DestroyComponent();
+			HandVisualizerComponent = nullptr;
 		}
 
 		if (HandVisualizerComponent)
@@ -582,7 +684,7 @@ void UHandSocketComponent::OnRegister()
 			{
 				if (HandPreviewMaterial)
 				{
-					HandVisualizerComponent->SetMaterial(0, (UMaterialInterface*)HandPreviewMaterial);
+					HandVisualizerComponent->SetMaterial(0, HandPreviewMaterial);
 				}
 				HandVisualizerComponent->SetSkinnedAssetAndUpdate(VisualizationMesh);
 			}
@@ -593,6 +695,16 @@ void UHandSocketComponent::OnRegister()
 	}
 
 #endif	// WITH_EDITORONLY_DATA
+
+	if (bLockInPlace && (MyWorldType != EWorldType::EditorPreview && MyWorldType != EWorldType::Editor))
+	{
+		// Store current starting relative transform
+		//LockedRelativeTransform = GetRelativeTransform();
+
+		// Kill off child updates
+		SetUsingAbsoluteLocation(true);
+		SetUsingAbsoluteRotation(true);
+	}
 
 	Super::OnRegister();
 }
@@ -662,9 +774,21 @@ void UHandSocketComponent::PoseVisualizationToAnimation(bool bForceRefresh)
 	if (!HandTargetAnimation)
 	{
 		// Store local poses for posing
-		LocalPoses = HandVisualizerComponent->GetSkinnedAsset()->GetSkeleton()->GetRefLocalPoses();
+		LocalPoses = HandVisualizerComponent->GetSkinnedAsset()->GetRefSkeleton().GetRefBonePose();
 	}
 
+
+
+	// Check out of the skin cache, the poses don't update otherwise when enabled
+	int32 NumLODs = HandVisualizerComponent->GetNumLODs();
+	HandVisualizerComponent->SkinCacheUsage.Empty(NumLODs);
+
+	for (int nLODs = 0; nLODs <= NumLODs; ++nLODs)
+	{
+		HandVisualizerComponent->SkinCacheUsage.Add(ESkinCacheUsage::Disabled);
+	}
+
+	// Now Pose the bones
 	TArray<FName> BonesNames;
 	HandVisualizerComponent->GetBoneNames(BonesNames);
 	int32 Bones = HandVisualizerComponent->GetNumBones();
@@ -711,6 +835,7 @@ void UHandSocketComponent::PoseVisualizationToAnimation(bool bForceRefresh)
 		else
 		{
 			BoneTrans = LocalPoses[i];
+			//BoneTrans = HandVisualizerComponent->GetSkinnedAsset()->GetRefSkeleton().GetRefBonePose()[i];
 		}
 
 		BoneTrans = BoneTrans * ParentTrans;// *HandVisualizerComponent->GetComponentTransform();
@@ -721,7 +846,6 @@ void UHandSocketComponent::PoseVisualizationToAnimation(bool bForceRefresh)
 		BoneTrans.ConcatenateRotation(DeltaQuat);
 		BoneTrans.NormalizeRotation();
 		HandVisualizerComponent->SetBoneTransformByName(BonesNames[i], BoneTrans, EBoneSpaces::ComponentSpace);
-
 	}
 
 	if (HandVisualizerComponent && (!bTickedPose || bForceRefresh))

@@ -3,6 +3,8 @@
 #include "Misc/VRLogComponent.h"
 #include UE_INLINE_GENERATED_CPP_BY_NAME(VRLogComponent)
 
+#include "GlobalRenderResources.h"
+
 //#include "Engine/Engine.h"
 
 /* Top of File */
@@ -88,12 +90,11 @@ bool UVRLogComponent::DrawConsoleToRenderTarget2D(EBPVRConsoleDrawType DrawType,
 
 	// Create the FCanvas which does the actual rendering.
 	//const ERHIFeatureLevel::Type FeatureLevel = World != nullptr ? World->FeatureLevel : GMaxRHIFeatureLevel;
-
 	FCanvas * RenderCanvas = new FCanvas(
-		Texture->GameThread_GetRenderTargetResource(),
+		(FRenderTarget*)Texture->GameThread_GetRenderTargetResource(),
 		nullptr,
 		World,
-		World->FeatureLevel,
+		World->GetFeatureLevel(),
 		// Draw immediately so that interleaved SetVectorParameter (etc) function calls work as expected
 		FCanvas::CDM_ImmediateDrawing);
 

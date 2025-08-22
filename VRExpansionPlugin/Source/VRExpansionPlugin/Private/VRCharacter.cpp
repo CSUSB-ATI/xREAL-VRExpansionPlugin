@@ -42,9 +42,16 @@ AVRCharacter::AVRCharacter(const FObjectInitializer& ObjectInitializer)
 
 FVector AVRCharacter::GetTeleportLocation(FVector OriginalLocation)
 {
-	FVector modifier = VRRootReference->OffsetComponentToWorld.GetLocation() - this->GetActorLocation();
-	modifier.Z = 0.0f; // Null out Z
-	return OriginalLocation - modifier;
+	if (!bRetainRoomscale)
+	{
+		return OriginalLocation + FVector(0.f, 0.f, VRRootReference->GetScaledCapsuleHalfHeight());
+	}
+	else
+	{
+		FVector modifier = VRRootReference->OffsetComponentToWorld.GetLocation() - this->GetActorLocation();
+		modifier.Z = 0.0f; // Null out Z
+		return OriginalLocation - modifier;
+	}
 }
 
 bool AVRCharacter::TeleportTo(const FVector& DestLocation, const FRotator& DestRotation, bool bIsATest, bool bNoCheck)
@@ -189,6 +196,45 @@ FVector AVRCharacter::GetTargetHeightOffset()
 {
 	return bRetainRoomscale ? FVector::ZeroVector : VRRootReference->GetTargetHeightOffset();
 }
+
+void AVRCharacter::OnStartCrouch(float HeightAdjust, float ScaledHeightAdjust)
+{
+	RecalculateBaseEyeHeight();
+
+	/*const ACharacter* DefaultChar = GetDefault<ACharacter>(GetClass());
+	if (Mesh && DefaultChar->Mesh)
+	{
+		FVector& MeshRelativeLocation = Mesh->GetRelativeLocation_DirectMutable();
+		MeshRelativeLocation.Z = DefaultChar->Mesh->GetRelativeLocation().Z + HeightAdjust;
+		BaseTranslationOffset.Z = MeshRelativeLocation.Z;
+	}
+	else
+	{
+		BaseTranslationOffset.Z = DefaultChar->BaseTranslationOffset.Z + HeightAdjust;
+	}*/
+
+	K2_OnStartCrouch(HeightAdjust, ScaledHeightAdjust);
+}
+
+void AVRCharacter::OnEndCrouch(float HeightAdjust, float ScaledHeightAdjust)
+{
+	RecalculateBaseEyeHeight();
+
+	/*const ACharacter* DefaultChar = GetDefault<ACharacter>(GetClass());
+	if (Mesh && DefaultChar->Mesh)
+	{
+		FVector& MeshRelativeLocation = Mesh->GetRelativeLocation_DirectMutable();
+		MeshRelativeLocation.Z = DefaultChar->Mesh->GetRelativeLocation().Z;
+		BaseTranslationOffset.Z = MeshRelativeLocation.Z;
+	}
+	else
+	{
+			BaseTranslationOffset.Z = DefaultChar->BaseTranslationOffset.Z;
+	}*/
+
+	K2_OnEndCrouch(HeightAdjust, ScaledHeightAdjust);
+}
+
 
 void AVRCharacter::RegenerateOffsetComponentToWorld(bool bUpdateBounds, bool bCalculatePureYaw)
 {

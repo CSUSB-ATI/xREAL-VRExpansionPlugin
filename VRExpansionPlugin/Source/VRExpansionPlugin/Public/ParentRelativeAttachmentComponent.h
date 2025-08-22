@@ -83,8 +83,8 @@ public:
 		FVector CustomOffset;
 	
 	// If true will subtract the HMD's location from the position, useful for if the actors base is set to the HMD location always (simple character).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRExpansionLibrary")
-	bool bOffsetByHMD;
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRExpansionLibrary")
+	//bool bOffsetByHMD;
 
 	// If true, will not set rotation every frame, only position
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRExpansionLibrary")
@@ -137,8 +137,7 @@ public:
 	FQuat GetCalculatedRotation(FRotator InverseRot, float DeltaTime)
 	{
 		FRotator FinalRot = FRotator::ZeroRotator;
-
-		if (FPlatformMath::Abs(FRotator::ClampAxis(InverseRot.Yaw) - LastRot) < YawTolerance)	// This is never true with the default value of 0.0f
+		if (FPlatformMath::Abs(FMath::FindDeltaAngleDegrees(InverseRot.Yaw, LastRot)) < YawTolerance)	// This is never true with the default value of 0.0f
 		{
 			if (!bWasSetOnce)
 			{

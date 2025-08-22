@@ -113,13 +113,13 @@ void AGrippableActor::PreReplication(IRepChangedPropertyTracker & ChangedPropert
 	}
 #endif
 
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	/*PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	UBlueprintGeneratedClass* BPClass = Cast<UBlueprintGeneratedClass>(GetClass());
 	if (BPClass != nullptr)
 	{
 		BPClass->InstancePreReplication(this, ChangedPropertyTracker);
 	}
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS*/
 }
 
 void AGrippableActor::GatherCurrentMovement()
@@ -147,9 +147,10 @@ void AGrippableActor::GatherCurrentMovement()
 			bool bFoundInCache = false;
 
 			UWorld* World = GetWorld();
+			int ServerFrame = 0;
 			if (FPhysScene_Chaos* Scene = static_cast<FPhysScene_Chaos*>(World->GetPhysicsScene()))
 			{
-				if (FRigidBodyState* FoundState = Scene->ReplicationCache.Map.Find(FObjectKey(RootPrimComp)))
+				if (const FRigidBodyState* FoundState = Scene->GetStateFromReplicationCache(RootPrimComp, ServerFrame))
 				{
 					RepMovement.FillFrom(*FoundState, this, Scene->ReplicationCache.ServerFrame);
 					bFoundInCache = true;
@@ -253,6 +254,30 @@ void AGrippableActor::GatherCurrentMovement()
 	}
 }
 
+bool AGrippableActor::ShouldWeSkipAttachmentReplication(bool bConsiderHeld) const
+{
+	if ((bConsiderHeld && !VRGripInterfaceSettings.bWasHeld) || GetNetMode() < ENetMode::NM_Client)
+		return false;
+
+	if (VRGripInterfaceSettings.MovementReplicationType == EGripMovementReplicationSettings::ClientSide_Authoritive ||
+		VRGripInterfaceSettings.MovementReplicationType == EGripMovementReplicationSettings::ClientSide_Authoritive_NoRep)
+	{
+		// First return if we are locally held (owner may not have replicated yet)
+		for (const FBPGripPair& Grip : VRGripInterfaceSettings.HoldingControllers)
+		{
+			if (IsValid(Grip.HoldingController) && Grip.HoldingController->IsLocallyControlled())
+			{
+				return true;
+			}
+		}
+
+		// then return if we have a local net owner
+		return HasLocalNetOwner();
+	}
+	else
+		return false;
+}
+
 void AGrippableActor::OnRep_AttachmentReplication()
 {
 	if (bAllowIgnoringAttachOnOwner && (ClientAuthReplicationData.bIsCurrentlyClientAuth || ShouldWeSkipAttachmentReplication()))
@@ -310,7 +335,7 @@ bool AGrippableActor::ReplicateSubobjects(UActorChannel* Channel, class FOutBunc
 {
 	bool WroteSomething = Super::ReplicateSubobjects(Channel, Bunch, RepFlags);
 
-	if (bReplicateGripScripts)
+	if (bReplicateGripScripts && !IsUsingRegisteredSubObjectList())
 	{
 		for (UVRGripScriptBase* Script : GripLogicScripts)
 		{
@@ -667,7 +692,7 @@ void AGrippableActor::Server_EndClientAuthReplication_Implementation()
 	{
 		if (FPhysScene* PhysScene = World->GetPhysicsScene())
 		{
-			if (FPhysicsReplication* PhysicsReplication = PhysScene->GetPhysicsReplication())
+			if (IPhysicsReplication* PhysicsReplication = PhysScene->GetPhysicsReplication())
 			{
 				if (UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(GetRootComponent()))
 				{
@@ -749,9 +774,9 @@ void AGrippableActor::PostNetReceivePhysicState()
 	Super::PostNetReceivePhysicState();
 }
 // This isn't called very many places but it does come up
-void AGrippableActor::MarkComponentsAsPendingKill()
+void AGrippableActor::MarkComponentsAsGarbage(bool bModify)
 {
-	Super::MarkComponentsAsPendingKill();
+	Super::MarkComponentsAsGarbage(bModify);
 
 	for (int32 i = 0; i < GripLogicScripts.Num(); ++i)
 	{

@@ -150,17 +150,14 @@ void UCollisionIgnoreSubsystem::CheckActiveFilters()
 {
 	bool bMadeChanges = false;
 
-	for (TPair<FCollisionPrimPair, FCollisionIgnorePairArray>& KeyPair : CollisionTrackedPairs)
+	for (TMap<FCollisionPrimPair, FCollisionIgnorePairArray>::TIterator ItRemove = CollisionTrackedPairs.CreateIterator(); ItRemove; ++ItRemove)
 	{
-		// First check for invalid primitives
-		if (!IsValid(KeyPair.Key.Prim1) || !IsValid(KeyPair.Key.Prim2))
+		// First check for invalid primitives and an empty pair array
+		if (!IsValid(ItRemove->Key.Prim1) || !IsValid(ItRemove->Key.Prim2) || ItRemove->Value.PairArray.Num() < 1)
 		{
-			// If we don't have a map element for this pair, then add it now
-			if (!RemovedPairs.Contains(KeyPair.Key))
-			{
-				RemovedPairs.Add(KeyPair.Key, KeyPair.Value);
-				bMadeChanges = true;
-			}
+			ItRemove->Value.PairArray.Empty();
+			ItRemove.RemoveCurrent();
+			bMadeChanges = true;
 
 			continue; // skip remaining checks as we have invalid primitives anyway
 		}
@@ -256,16 +253,6 @@ void UCollisionIgnoreSubsystem::CheckActiveFilters()
 				});
 		}
 #endif
-
-		// If there are no pairs left
-		if (KeyPair.Value.PairArray.Num() < 1)
-		{
-			// Try and remove it, chaos should be cleaning up the ignore setups
-			if (!RemovedPairs.Contains(KeyPair.Key))
-			{
-				RemovedPairs.Add(KeyPair.Key, KeyPair.Value);
-			}
-		}
 	}
 
 /*#if WITH_CHAOS
@@ -284,13 +271,18 @@ void UCollisionIgnoreSubsystem::CheckActiveFilters()
 	}
 #endif*/
 
-	for (const TPair<FCollisionPrimPair, FCollisionIgnorePairArray>& KeyPair : RemovedPairs)
+	/*for (const TPair<FCollisionPrimPair, FCollisionIgnorePairArray>& KeyPair : RemovedPairs)
 	{
 		if (CollisionTrackedPairs.Contains(KeyPair.Key))
 		{
 			CollisionTrackedPairs[KeyPair.Key].PairArray.Empty();
 			CollisionTrackedPairs.Remove(KeyPair.Key);
 		}
+	}*/
+
+	if (bMadeChanges)
+	{
+		CollisionTrackedPairs.Compact();
 	}
 
 	UpdateTimer(bMadeChanges);
@@ -406,14 +398,15 @@ void UCollisionIgnoreSubsystem::SetComponentCollisionIgnoreState(bool bIterateCh
 		return;
 	}
 
-	if (Prim1->Mobility == EComponentMobility::Static || Prim2->Mobility == EComponentMobility::Static)
+	// Appears to work now with the chaos collision ignore setup
+	/*if (Prim1->Mobility == EComponentMobility::Static || Prim2->Mobility == EComponentMobility::Static)
 	{
 		UE_LOG(VRE_CollisionIgnoreLog, Error, TEXT("Set Objects Ignore Collision called with at least one static mobility object (cannot ignore collision with it)!!"));
 		if (bIgnoreCollision)
 		{
 			return;
 		}
-	}
+	}*/
 
 	USkeletalMeshComponent* SkeleMesh = nullptr;
 	USkeletalMeshComponent* SkeleMesh2 = nullptr;

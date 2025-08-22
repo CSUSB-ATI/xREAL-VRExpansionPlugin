@@ -12,6 +12,7 @@
 #include "Net/UnrealNetwork.h"
 #include "PhysicsReplication.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
+#include "PhysicsEngine/PhysicsAsset.h" // Tmp until epic bug fixes skeletal welding
 #if WITH_PUSH_MODEL
 #include "Net/Core/PushModel/PushModel.h"
 #endif
@@ -37,6 +38,75 @@ void UOptionalRepSkeletalMeshComponent::GetLifetimeReplicatedProps(TArray< class
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(UOptionalRepSkeletalMeshComponent, bReplicateMovement);
+}
+
+void UOptionalRepSkeletalMeshComponent::GetWeldedBodies(TArray<FBodyInstance*>& OutWeldedBodies, TArray<FName>& OutLabels, bool bIncludingAutoWeld)
+{
+	UPhysicsAsset* PhysicsAsset = GetPhysicsAsset();
+
+	for (int32 BodyIdx = 0; BodyIdx < Bodies.Num(); ++BodyIdx)
+	{
+		FBodyInstance* BI = Bodies[BodyIdx];
+		if (BI && (BI->WeldParent != nullptr || (bIncludingAutoWeld && BI->bAutoWeld)))
+		{
+			OutWeldedBodies.Add(BI);
+			if (PhysicsAsset)
+			{
+				if (UBodySetup* PhysicsAssetBodySetup = PhysicsAsset->SkeletalBodySetups[BodyIdx])
+				{
+					OutLabels.Add(PhysicsAssetBodySetup->BoneName);
+				}
+				else
+				{
+					OutLabels.Add(NAME_None);
+				}
+			}
+			else
+			{
+				OutLabels.Add(NAME_None);
+			}
+
+		}
+	}
+
+	for (USceneComponent* Child : GetAttachChildren())
+	{
+		if (UPrimitiveComponent* PrimChild = Cast<UPrimitiveComponent>(Child))
+		{
+			PrimChild->GetWeldedBodies(OutWeldedBodies, OutLabels, bIncludingAutoWeld);
+		}
+	}
+}
+
+FBodyInstance* UOptionalRepSkeletalMeshComponent::GetBodyInstance(FName BoneName, bool bGetWelded, int32) const
+{
+	UPhysicsAsset* const PhysicsAsset = GetPhysicsAsset();
+	FBodyInstance* BodyInst = NULL;
+
+	if (PhysicsAsset != NULL)
+	{
+		// A name of NAME_None indicates 'root body'
+		if (BoneName == NAME_None)
+		{
+			if (Bodies.IsValidIndex(RootBodyData.BodyIndex))
+			{
+				BodyInst = Bodies[RootBodyData.BodyIndex];
+			}
+		}
+		// otherwise, look for the body
+		else
+		{
+			int32 BodyIndex = PhysicsAsset->FindBodyIndex(BoneName);
+			if (Bodies.IsValidIndex(BodyIndex))
+			{
+				BodyInst = Bodies[BodyIndex];
+			}
+		}
+
+		BodyInst = (bGetWelded && BodyInstance.WeldParent) ? BodyInstance.WeldParent : BodyInst;
+	}
+
+	return BodyInst;
 }
 
 //=============================================================================
@@ -132,13 +202,13 @@ void AGrippableSkeletalMeshActor::PreReplication(IRepChangedPropertyTracker& Cha
 	}
 #endif
 
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	/*PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	UBlueprintGeneratedClass* BPClass = Cast<UBlueprintGeneratedClass>(GetClass());
 	if (BPClass != nullptr)
 	{
 		BPClass->InstancePreReplication(this, ChangedPropertyTracker);
 	}
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS*/
 }
 
 void AGrippableSkeletalMeshActor::GatherCurrentMovement()
@@ -166,9 +236,10 @@ void AGrippableSkeletalMeshActor::GatherCurrentMovement()
 			bool bFoundInCache = false;
 
 			UWorld* World = GetWorld();
+			int ServerFrame = 0;
 			if (FPhysScene_Chaos* Scene = static_cast<FPhysScene_Chaos*>(World->GetPhysicsScene()))
 			{
-				if (FRigidBodyState* FoundState = Scene->ReplicationCache.Map.Find(FObjectKey(RootPrimComp)))
+				if (const FRigidBodyState* FoundState = Scene->GetStateFromReplicationCache(RootPrimComp, ServerFrame))
 				{
 					RepMovement.FillFrom(*FoundState, this, Scene->ReplicationCache.ServerFrame);
 					bFoundInCache = true;
@@ -634,8 +705,8 @@ void AGrippableSkeletalMeshActor::Server_EndClientAuthReplication_Implementation
 	if (UWorld* World = GetWorld())
 	{
 		if (FPhysScene* PhysScene = World->GetPhysicsScene())
-		{
-			if (FPhysicsReplication* PhysicsReplication = PhysScene->GetPhysicsReplication())
+		{ 
+			if (IPhysicsReplication* PhysicsReplication = PhysScene->GetPhysicsReplication())
 			{
 				PhysicsReplication->RemoveReplicatedTarget(this->GetSkeletalMeshComponent());
 			}
@@ -659,6 +730,30 @@ void AGrippableSkeletalMeshActor::Server_GetClientAuthReplication_Implementation
 			OnRep_ReplicatedMovement();
 		}
 	}
+}
+
+bool AGrippableSkeletalMeshActor::ShouldWeSkipAttachmentReplication(bool bConsiderHeld) const
+{
+	if ((bConsiderHeld && !VRGripInterfaceSettings.bWasHeld) || GetNetMode() < ENetMode::NM_Client)
+		return false;
+
+	if (VRGripInterfaceSettings.MovementReplicationType == EGripMovementReplicationSettings::ClientSide_Authoritive ||
+		VRGripInterfaceSettings.MovementReplicationType == EGripMovementReplicationSettings::ClientSide_Authoritive_NoRep)
+	{
+		// First return if we are locally held (owner may not have replicated yet)
+		for (const FBPGripPair& Grip : VRGripInterfaceSettings.HoldingControllers)
+		{
+			if (IsValid(Grip.HoldingController) && Grip.HoldingController->IsLocallyControlled())
+			{
+				return true;
+			}
+		}
+
+		// then return if we have a local net owner
+		return HasLocalNetOwner();
+	}
+	else
+		return false;
 }
 
 void AGrippableSkeletalMeshActor::OnRep_AttachmentReplication()
@@ -767,9 +862,9 @@ void AGrippableSkeletalMeshActor::PostNetReceivePhysicState()
 	Super::PostNetReceivePhysicState();
 }
 
-void AGrippableSkeletalMeshActor::MarkComponentsAsPendingKill()
+void AGrippableSkeletalMeshActor::MarkComponentsAsGarbage(bool bModify)
 {
-	Super::MarkComponentsAsPendingKill();
+	Super::MarkComponentsAsGarbage(bModify);
 
 	for (int32 i = 0; i < GripLogicScripts.Num(); ++i)
 	{

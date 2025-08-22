@@ -279,7 +279,7 @@ public:
 
 	// If true then we will retain roomscale tracking in relative space of the character.
 	// If false than the movement component will offset to the hmd tracking and the tracking will be nulled out
-	UPROPERTY(Category = VRBaseCharacter, EditDefaultsOnly)
+	UPROPERTY(Category = VRBaseCharacter, EditAnywhere, BlueprintReadOnly)
 		bool bRetainRoomscale = true;
 
 	//virtual void CacheInitialMeshOffset(FVector MeshRelativeLocation, FRotator MeshRelativeRotation) override;
@@ -484,6 +484,9 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "BaseVRCharacter", meta = (DisplayName = "ReZeroSeating"))
 		void Server_ReZeroSeating(FTransform_NetQuantize NewTargetTransform, FTransform_NetQuantize NewInitialRelCameraTransform, bool bZeroToHead = true);
 
+	// Snapturn update
+	UFUNCTION(Reliable, Server, WithValidation)
+		void Server_SeatedSnapTurn(float Yaw);
 
 	// Sets seated mode on the character and then fires off an event to handle any special setup
 	// Target Transform is for teleport location if standing up, or relative camera location when sitting down.

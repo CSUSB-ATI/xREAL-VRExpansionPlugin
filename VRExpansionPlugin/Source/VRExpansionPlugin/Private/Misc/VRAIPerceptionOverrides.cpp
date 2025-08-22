@@ -7,17 +7,17 @@
 #include "EngineGlobals.h"
 #include "CollisionQueryParams.h"
 //#include "Engine/Engine.h"
-#include "AIModule/Classes/AISystem.h"
-#include "AIModule/Public/AIHelpers.h"
-#include "AIModule/Classes/Perception/AIPerceptionComponent.h"
+#include "AISystem.h"
+#include "AIHelpers.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "VisualLogger/VisualLogger.h"
-#include "AIModule/Classes/Perception/AISightTargetInterface.h"
-#include "AIModule/Classes/Perception/AISenseConfig_Sight.h"
-#include "AIModule/Classes/Perception/AIPerceptionSystem.h"
+#include "Perception/AISightTargetInterface.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AIPerceptionSystem.h"
 
 #if WITH_GAMEPLAY_DEBUGGER
-#include "GameplayDebugger/Public/GameplayDebuggerTypes.h"
-#include "GameplayDebugger/Public/GameplayDebuggerCategory.h"
+#include "GameplayDebuggerTypes.h"
+#include "GameplayDebuggerCategory.h"
 #endif
 DEFINE_LOG_CATEGORY(LogAIPerceptionVR);
 
@@ -427,7 +427,7 @@ float UAISense_Sight_VR::Update()
 			}
 			else
 			{
-				UE_CLOG(VisibilityResult != UAISense_Sight::EVisibilityResult::Visible && VisibilityResult != UAISense_Sight::EVisibilityResult::NotVisible, LogAIPerception, Error, TEXT("UAISense_Sight::Update received invalid Visibility result [%d] for query between Listener %s and Target %s. We'll consider it as NotVisible"), VisibilityResult, *GetNameSafe(ListenerBodyActor), *GetNameSafe(TargetActor));
+				UE_CLOG(VisibilityResult != UAISense_Sight::EVisibilityResult::Visible && VisibilityResult != UAISense_Sight::EVisibilityResult::NotVisible, LogAIPerception, Error, TEXT("UAISense_Sight::Update received invalid Visibility result [%d] for query between Listener %s and Target %s. We'll consider it as NotVisible"), int(VisibilityResult), *GetNameSafe(ListenerBodyActor), *GetNameSafe(TargetActor));
 
 				const bool bIsVisible = VisibilityResult == UAISense_Sight::EVisibilityResult::Visible;
 				const bool bWasVisible = SightQuery->GetLastResult();
@@ -436,7 +436,7 @@ float UAISense_Sight_VR::Update()
 				const AVRBaseCharacter* VRChar = Cast<const AVRBaseCharacter>(TargetActor);
 				const FVector TargetLocation = VRChar != nullptr ? VRChar->GetVRLocation_Inline() : TargetActor->GetActorLocation();
 
-				UpdateQueryVisibilityStatus(*SightQuery, Listener, bIsVisible, SeenLocation, StimulusStrength, TargetActor, TargetLocation);
+				UpdateQueryVisibilityStatus(*SightQuery, Listener, bIsVisible, SeenLocation, StimulusStrength, *TargetActor, TargetLocation);
 
 				const float SightRadiusSq = bWasVisible ? PropDigest.LoseSightRadiusSq : PropDigest.SightRadiusSq;
 				SightQuery->Importance = CalcQueryImportance(Listener, TargetLocation, SightRadiusSq);
@@ -665,10 +665,18 @@ UAISense_Sight::EVisibilityResult UAISense_Sight_VR::ComputeVisibility(UWorld* W
 
 void UAISense_Sight_VR::UpdateQueryVisibilityStatus(FAISightQueryVR& SightQuery, FPerceptionListener& Listener, const bool bIsVisible, const FVector& SeenLocation, const float StimulusStrength, AActor* TargetActor, const FVector& TargetLocation) const
 {
+	if (TargetActor)
+	{
+		UpdateQueryVisibilityStatus(SightQuery, Listener, bIsVisible, SeenLocation, StimulusStrength, *TargetActor, TargetLocation);
+	}
+}
+
+void UAISense_Sight_VR::UpdateQueryVisibilityStatus(FAISightQueryVR& SightQuery, FPerceptionListener& Listener, const bool bIsVisible, const FVector& SeenLocation, const float StimulusStrength, AActor& TargetActor, const FVector& TargetLocation) const
+{
 	if (bIsVisible)
 	{
 		const bool bHasValidSeenLocation = SeenLocation != FAISystem::InvalidLocation;
-		Listener.RegisterStimulus(TargetActor, FAIStimulus(*this, StimulusStrength, bHasValidSeenLocation ? SeenLocation : SightQuery.LastSeenLocation, Listener.CachedLocation));
+		Listener.RegisterStimulus(&TargetActor, FAIStimulus(*this, StimulusStrength, bHasValidSeenLocation ? SeenLocation : SightQuery.LastSeenLocation, Listener.CachedLocation));
 		SightQuery.SetLastResult(true);
 		if (bHasValidSeenLocation)
 		{
@@ -678,12 +686,12 @@ void UAISense_Sight_VR::UpdateQueryVisibilityStatus(FAISightQueryVR& SightQuery,
 	// communicate failure only if we've seen given actor before
 	else if (SightQuery.GetLastResult())
 	{
-		Listener.RegisterStimulus(TargetActor, FAIStimulus(*this, 0.f, TargetLocation, Listener.CachedLocation, FAIStimulus::SensingFailed));
+		Listener.RegisterStimulus(&TargetActor, FAIStimulus(*this, 0.f, TargetLocation, Listener.CachedLocation, FAIStimulus::SensingFailed));
 		SightQuery.SetLastResult(false);
 		SightQuery.LastSeenLocation = FAISystem::InvalidLocation;
 	}
 
-	//SIGHT_LOG_SEGMENT(ListenerPtr->GetOwner(), Listener.CachedLocation, TargetLocation, bIsVisible ? FColor::Green : FColor::Red, TEXT("TargetID %d"), Target.TargetId);
+	//	SIGHT_LOG_SEGMENT(Listener.GetBodyActor(), Listener.CachedLocation, TargetLocation, bIsVisible ? FColor::Green : FColor::Red, TEXT("Target: %s"), *TargetActor.GetName());
 }
 
 void UAISense_Sight_VR::OnPendingCanBeSeenQueryProcessed(const FAISightQueryID& QueryID, const bool bIsVisible, const float StimulusStrength, const FVector& SeenLocation, const TOptional<int32>& UserData)
@@ -774,7 +782,7 @@ void UAISense_Sight_VR::OnPendingQueryProcessed(const int32 SightQueryIndex, con
 	const AVRBaseCharacter* VRChar = Cast<const AVRBaseCharacter>(TargetActor);
 	const FVector TargetLocation = VRChar != nullptr ? VRChar->GetVRLocation_Inline() : TargetActor->GetActorLocation();
 
-	UpdateQueryVisibilityStatus(SightQuery, *Listener, bIsVisible, SeenLocation, StimulusStrength, TargetActor, TargetLocation);
+	UpdateQueryVisibilityStatus(SightQuery, *Listener, bIsVisible, SeenLocation, StimulusStrength, *TargetActor, TargetLocation);
 
 	if (UserData.IsSet())
 	{
@@ -825,7 +833,7 @@ void UAISense_Sight_VR::UnregisterSource(AActor& SourceActor)
 
 
 	if (ObservedTargets.RemoveAndCopyValue(AsTargetId, AsTarget)
-		&& (SightQueriesInRange.Num() + SightQueriesOutOfRange.Num()) > 0)
+		&& (SightQueriesInRange.Num() + SightQueriesOutOfRange.Num() + SightQueriesPending.Num()) > 0)
 	{
 		AActor* TargetActor = AsTarget.Target.Get();
 
@@ -953,7 +961,7 @@ void UAISense_Sight_VR::GenerateQueriesForListener(const FPerceptionListener& Li
 		}
 
 		// Changed this up to support my VR Characters
-		const AVRBaseCharacter* VRChar = Cast<const AVRBaseCharacter>(&TargetActor);
+		const AVRBaseCharacter* VRChar = Cast<const AVRBaseCharacter>(TargetActor);
 		const FVector TargetLocation = VRChar != nullptr ? VRChar->GetVRLocation_Inline() : TargetActor->GetActorLocation();
 		if (RegisterNewQuery(Listener, ListenersTeamAgent, *TargetActor, ItTarget->Key, TargetLocation, PropertyDigest, OnAddedFunc))
 		{
@@ -1282,4 +1290,21 @@ void UAISenseConfig_Sight_VR::DescribeSelfToGameplayDebugger(const UAIPerception
 		DebuggerCategory->AddShape(FGameplayDebuggerShape::MakeSegment(BodyLocation, BodyLocation + (BodyFacing.RotateAngleAxis(-PeripheralVisionAngleDegrees, FVector::UpVector) * SightPieLength), SightRangeColor));
 	}
 }
+
+#if WITH_GAMEPLAY_DEBUGGER_MENU
+void UAISense_Sight_VR::DescribeSelfToGameplayDebugger(const UAIPerceptionSystem& PerceptionSystem, FGameplayDebuggerCategory& DebuggerCategory) const
+{
+	const int32 TotalQueriesCount = SightQueriesInRange.Num() + SightQueriesOutOfRange.Num() + SightQueriesPending.Num();
+	DebuggerCategory.AddTextLine(
+		FString::Printf(TEXT("%s: %d Targets, %d Queries (InRange:%d, OutOfRange:%d, Pending:%d)"),
+			*GetSenseID().Name.ToString(),
+			ObservedTargets.Num(),
+			TotalQueriesCount,
+			SightQueriesInRange.Num(),
+			SightQueriesOutOfRange.Num(),
+			SightQueriesPending.Num())
+	);
+}
+#endif // WITH_GAMEPLAY_DEBUGGER_MENU
+
 #endif // WITH_GAMEPLAY_DEBUGGER
