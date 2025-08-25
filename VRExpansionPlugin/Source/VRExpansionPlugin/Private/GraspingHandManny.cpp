@@ -819,7 +819,9 @@ void AGraspingHandManny::GetOrSpawnAttachmentProxy()
 {
     if (HasAuthority())
     {
-        TArray<UActorComponent*> sphereComponents = OwningController->GetOwner()->GetComponentsByClass(UNoRepSphereComponent::StaticClass());
+        TArray<UNoRepSphereComponent*> sphereComponents;
+        OwningController->GetOwner()->GetComponents<UNoRepSphereComponent>(sphereComponents);
+
 
         EControllerHand handType;
         OwningController->GetHandType(handType);
