@@ -10,7 +10,9 @@ namespace UnrealBuildTool.Rules
         public OpenXRExpansionPlugin(ReadOnlyTargetRules Target) 
 				: base(Target)
         {
-			PublicDependencyModuleNames.AddRange(
+            SetupIrisSupport(Target);
+
+            PublicDependencyModuleNames.AddRange(
 			   new string[]
 			   {
 					//"InputDevice",
@@ -49,7 +51,7 @@ namespace UnrealBuildTool.Rules
                 }
 				);
                 
-            if (Target.Platform != UnrealTargetPlatform.Mac)
+            if (Target.Platform != UnrealTargetPlatform.Mac && Target.Platform != UnrealTargetPlatform.IOS)
             {
                 PrivateDependencyModuleNames.AddRange(
                     new string[]

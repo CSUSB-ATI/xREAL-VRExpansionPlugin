@@ -13,6 +13,8 @@
 #include "PhysicsReplication.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
 #include "PhysicsEngine/PhysicsAsset.h" // Tmp until epic bug fixes skeletal welding
+#include "PhysicsEngine/BodySetup.h"
+#include "PhysicsEngine/SkeletalBodySetup.h"
 #if WITH_PUSH_MODEL
 #include "Net/Core/PushModel/PushModel.h"
 #endif
@@ -37,7 +39,18 @@ void UOptionalRepSkeletalMeshComponent::GetLifetimeReplicatedProps(TArray< class
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(UOptionalRepSkeletalMeshComponent, bReplicateMovement);
+	// For std properties
+	FDoRepLifetimeParams PushModelParams{ COND_None, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(UOptionalRepSkeletalMeshComponent, bReplicateMovement, PushModelParams);
+}
+
+void UOptionalRepSkeletalMeshComponent::SetReplicateMovement(bool bNewReplicateMovement)
+{
+	bReplicateMovement = bNewReplicateMovement;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(UOptionalRepSkeletalMeshComponent, bReplicateMovement, this);
+#endif
 }
 
 void UOptionalRepSkeletalMeshComponent::GetWeldedBodies(TArray<FBodyInstance*>& OutWeldedBodies, TArray<FName>& OutLabels, bool bIncludingAutoWeld)
@@ -52,7 +65,7 @@ void UOptionalRepSkeletalMeshComponent::GetWeldedBodies(TArray<FBodyInstance*>& 
 			OutWeldedBodies.Add(BI);
 			if (PhysicsAsset)
 			{
-				if (UBodySetup* PhysicsAssetBodySetup = PhysicsAsset->SkeletalBodySetups[BodyIdx])
+				if (UBodySetup* PhysicsAssetBodySetup = PhysicsAsset->SkeletalBodySetups[BodyIdx].Get())
 				{
 					OutLabels.Add(PhysicsAssetBodySetup->BoneName);
 				}
@@ -145,20 +158,27 @@ AGrippableSkeletalMeshActor::AGrippableSkeletalMeshActor(const FObjectInitialize
 
 	// Setting a minimum of every 3rd frame (VR 90fps) for replication consideration
 	// Otherwise we will get some massive slow downs if the replication is allowed to hit the 2 per second minimum default
-	MinNetUpdateFrequency = 30.0f;
+	SetMinNetUpdateFrequency(30.0f);
 }
 
 void AGrippableSkeletalMeshActor::GetLifetimeReplicatedProps(TArray< class FLifetimeProperty >& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME_CONDITION(AGrippableSkeletalMeshActor, GripLogicScripts, COND_Custom);
-	DOREPLIFETIME(AGrippableSkeletalMeshActor, bReplicateGripScripts);
-	DOREPLIFETIME(AGrippableSkeletalMeshActor, bRepGripSettingsAndGameplayTags);
-	DOREPLIFETIME(AGrippableSkeletalMeshActor, bAllowIgnoringAttachOnOwner);
-	DOREPLIFETIME(AGrippableSkeletalMeshActor, ClientAuthReplicationData);
-	DOREPLIFETIME_CONDITION(AGrippableSkeletalMeshActor, VRGripInterfaceSettings, COND_Custom);
-	DOREPLIFETIME_CONDITION(AGrippableSkeletalMeshActor, GameplayTags, COND_Custom);
+	// For std properties
+	FDoRepLifetimeParams PushModelParams{ COND_None, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(AGrippableSkeletalMeshActor, bReplicateGripScripts, PushModelParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AGrippableSkeletalMeshActor, bRepGripSettingsAndGameplayTags, PushModelParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AGrippableSkeletalMeshActor, bAllowIgnoringAttachOnOwner, PushModelParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AGrippableSkeletalMeshActor, ClientAuthReplicationData, PushModelParams);
+
+	// For properties with special conditions
+	FDoRepLifetimeParams PushModelParamsWithCondition{ COND_Custom, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(AGrippableSkeletalMeshActor, GripLogicScripts, PushModelParamsWithCondition);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AGrippableSkeletalMeshActor, VRGripInterfaceSettings, PushModelParamsWithCondition);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AGrippableSkeletalMeshActor, GameplayTags, PushModelParamsWithCondition);
 
 	DISABLE_REPLICATED_PRIVATE_PROPERTY(AActor, AttachmentReplication);
 
@@ -213,86 +233,23 @@ void AGrippableSkeletalMeshActor::PreReplication(IRepChangedPropertyTracker& Cha
 
 void AGrippableSkeletalMeshActor::GatherCurrentMovement()
 {
-	if (IsReplicatingMovement() || (RootComponent && RootComponent->GetAttachParent()))
+	Super::GatherCurrentMovement();
+
+	FRepMovement RepMovement = GetReplicatedMovement();
+	if (RootComponent && (!RepMovement.bRepPhysics || RootComponent->GetAttachParent()))
 	{
-		bool bWasAttachmentModified = false;
-		bool bWasRepMovementModified = false;
-
-		AActor* OldAttachParent = AttachmentWeldReplication.AttachParent;
-		USceneComponent* OldAttachComponent = AttachmentWeldReplication.AttachComponent;
-
-		AttachmentWeldReplication.AttachParent = nullptr;
-		AttachmentWeldReplication.AttachComponent = nullptr;
-
-		FRepMovement& RepMovement = GetReplicatedMovement_Mutable();
-
 		UPrimitiveComponent* RootPrimComp = Cast<UPrimitiveComponent>(GetRootComponent());
-		if (RootPrimComp && RootPrimComp->IsSimulatingPhysics())
+
+		if (!RepMovement.bRepPhysics || (!RootPrimComp || !RootPrimComp->IsSimulatingPhysics()))
 		{
-#if UE_WITH_IRIS
-			const bool bPrevRepPhysics = GetReplicatedMovement_Mutable().bRepPhysics;
-#endif // UE_WITH_IRIS
+			bool bWasAttachmentModified = false;
 
-			bool bFoundInCache = false;
+			AActor* OldAttachParent = AttachmentWeldReplication.AttachParent;
+			USceneComponent* OldAttachComponent = AttachmentWeldReplication.AttachComponent;
 
-			UWorld* World = GetWorld();
-			int ServerFrame = 0;
-			if (FPhysScene_Chaos* Scene = static_cast<FPhysScene_Chaos*>(World->GetPhysicsScene()))
-			{
-				if (const FRigidBodyState* FoundState = Scene->GetStateFromReplicationCache(RootPrimComp, ServerFrame))
-				{
-					RepMovement.FillFrom(*FoundState, this, Scene->ReplicationCache.ServerFrame);
-					bFoundInCache = true;
-				}
-			}
+			AttachmentWeldReplication.AttachParent = nullptr;
+			AttachmentWeldReplication.AttachComponent = nullptr;
 
-			if (!bFoundInCache)
-			{
-				// fallback to GT data
-				FRigidBodyState RBState;
-				RootPrimComp->GetRigidBodyState(RBState);
-				RepMovement.FillFrom(RBState, this, 0);
-			}
-
-			// Don't replicate movement if we're welded to another parent actor.
-			// Their replication will affect our position indirectly since we are attached.
-			RepMovement.bRepPhysics = !RootPrimComp->IsWelded();
-
-			if (!RepMovement.bRepPhysics)
-			{
-				if (RootComponent->GetAttachParent() != nullptr)
-				{
-					// Networking for attachments assumes the RootComponent of the AttachParent actor. 
-					// If that's not the case, we can't update this, as the client wouldn't be able to resolve the Component and would detach as a result.
-					AttachmentWeldReplication.AttachParent = RootComponent->GetAttachParent()->GetAttachmentRootActor();
-					if (AttachmentWeldReplication.AttachParent != nullptr)
-					{
-						AttachmentWeldReplication.LocationOffset = RootComponent->GetRelativeLocation();
-						AttachmentWeldReplication.RotationOffset = RootComponent->GetRelativeRotation();
-						AttachmentWeldReplication.RelativeScale3D = RootComponent->GetRelativeScale3D();
-						AttachmentWeldReplication.AttachComponent = RootComponent->GetAttachParent();
-						AttachmentWeldReplication.AttachSocket = RootComponent->GetAttachSocketName();
-						AttachmentWeldReplication.bIsWelded = RootPrimComp ? RootPrimComp->IsWelded() : false;
-
-						// Technically, the values might have stayed the same, but we'll just assume they've changed.
-						bWasAttachmentModified = true;
-
-#if UE_WITH_IRIS
-						// If RepPhysics has changed value then notify the ReplicationSystem
-						if (bPrevRepPhysics != GetReplicatedMovement_Mutable().bRepPhysics)
-						{
-							UpdateReplicatePhysicsCondition();
-						}
-#endif // UE_WITH_IRIS
-					}
-				}
-			}
-
-			// Technically, the values might have stayed the same, but we'll just assume they've changed.
-			bWasRepMovementModified = true;
-		}
-		else if (RootComponent != nullptr)
-		{
 			// If we are attached, don't replicate absolute position, use AttachmentReplication instead.
 			if (RootComponent->GetAttachParent() != nullptr)
 			{
@@ -312,33 +269,16 @@ void AGrippableSkeletalMeshActor::GatherCurrentMovement()
 					bWasAttachmentModified = true;
 				}
 			}
-			else
+
+			if (bWasAttachmentModified ||
+				OldAttachParent != AttachmentWeldReplication.AttachParent ||
+				OldAttachComponent != AttachmentWeldReplication.AttachComponent)
 			{
-				RepMovement.Location = FRepMovement::RebaseOntoZeroOrigin(RootComponent->GetComponentLocation(), this);
-				RepMovement.Rotation = RootComponent->GetComponentRotation();
-				RepMovement.LinearVelocity = GetVelocity();
-				RepMovement.AngularVelocity = FVector::ZeroVector;
-
-				// Technically, the values might have stayed the same, but we'll just assume they've changed.
-				bWasRepMovementModified = true;
-			}
-
-			bWasRepMovementModified = (bWasRepMovementModified || RepMovement.bRepPhysics);
-			RepMovement.bRepPhysics = false;
-		}
 #if WITH_PUSH_MODEL
-		if (bWasRepMovementModified)
-		{
-			MARK_PROPERTY_DIRTY_FROM_NAME(AActor, ReplicatedMovement, this);
-		}
-
-		if (bWasAttachmentModified ||
-			OldAttachParent != AttachmentWeldReplication.AttachParent ||
-			OldAttachComponent != AttachmentWeldReplication.AttachComponent)
-		{
-			MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, AttachmentWeldReplication, this);
-		}
+				MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, AttachmentWeldReplication, this);
 #endif
+			}
+		}
 	}
 }
 
@@ -932,3 +872,79 @@ void AGrippableSkeletalMeshActor::GetSubobjectsWithStableNamesForNetworking(TArr
 		}
 	}
 }
+
+/////////////////////////////////////////////////
+//- Push networking getter / setter functions
+/////////////////////////////////////////////////
+
+void AGrippableSkeletalMeshActor::SetReplicateGripScripts(bool bNewReplicateGripScripts)
+{
+	bReplicateGripScripts = bNewReplicateGripScripts;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, bReplicateGripScripts, this);
+#endif
+}
+
+TArray<TObjectPtr<UVRGripScriptBase>>& AGrippableSkeletalMeshActor::GetGripLogicScripts()
+{
+#if WITH_PUSH_MODEL
+	if (bReplicateGripScripts)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, GripLogicScripts, this);
+	}
+#endif
+
+	return GripLogicScripts;
+}
+
+void AGrippableSkeletalMeshActor::SetRepGripSettingsAndGameplayTags(bool bNewRepGripSettingsAndGameplayTags)
+{
+	bRepGripSettingsAndGameplayTags = bNewRepGripSettingsAndGameplayTags;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, bRepGripSettingsAndGameplayTags, this);
+#endif
+}
+
+void AGrippableSkeletalMeshActor::SetAllowIgnoringAttachOnOwner(bool bNewAllowIgnoringAttachOnOwner)
+{
+	bAllowIgnoringAttachOnOwner = bNewAllowIgnoringAttachOnOwner;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, bAllowIgnoringAttachOnOwner, this);
+#endif
+}
+
+FVRClientAuthReplicationData& AGrippableSkeletalMeshActor::GetClientAuthReplicationData(FVRClientAuthReplicationData& ClientAuthData)
+{
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, ClientAuthReplicationData, this);
+#endif
+	return ClientAuthReplicationData;
+}
+
+FBPInterfaceProperties& AGrippableSkeletalMeshActor::GetVRGripInterfaceSettings(bool bMarkDirty)
+{
+#if WITH_PUSH_MODEL
+	if (bMarkDirty && bRepGripSettingsAndGameplayTags)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, VRGripInterfaceSettings, this);
+	}
+#endif
+
+	return VRGripInterfaceSettings;
+}
+
+FGameplayTagContainer& AGrippableSkeletalMeshActor::GetGameplayTags()
+{
+#if WITH_PUSH_MODEL
+	if (bRepGripSettingsAndGameplayTags)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(AGrippableSkeletalMeshActor, GameplayTags, this);
+	}
+#endif
+
+	return GameplayTags;
+}
+
+/////////////////////////////////////////////////
+//- End Push networking getter / setter functions
+/////////////////////////////////////////////////

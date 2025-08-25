@@ -11,12 +11,14 @@
 #include "VRRootComponent.h"
 #include "TextureResource.h"
 #include "Engine/Texture.h"
+#include "Engine/Texture2D.h"
 #include "Engine/GameInstance.h"
 #include "SceneManagement.h"
 #include "Materials/Material.h"
 #include "IStereoLayers.h"
 #include "IHeadMountedDisplay.h"
 #include "PrimitiveViewRelevance.h"
+#include "StereoLayerAdditionalFlagsManager.h"
 #include "PrimitiveSceneProxy.h"
 #include "UObject/ConstructorHelpers.h"
 #include "EngineGlobals.h"
@@ -384,9 +386,9 @@ UVRStereoWidgetComponent::UVRStereoWidgetComponent(const FObjectInitializer& Obj
 	//, StereoLayerType(SLT_TrackerLocked)
 	//, StereoLayerShape(SLSH_QuadLayer)
 	, Priority(0)
+	, LayerId(IStereoLayers::FLayerDesc::INVALID_LAYER_ID)
 	, bIsDirty(true)
 	, bTextureNeedsUpdate(false)
-	, LayerId(IStereoLayers::FLayerDesc::INVALID_LAYER_ID)
 	, LastTransform(FTransform::Identity)
 	, bLastVisible(false)
 {
@@ -410,6 +412,18 @@ UVRStereoWidgetComponent::UVRStereoWidgetComponent(const FObjectInitializer& Obj
 UVRStereoWidgetComponent::~UVRStereoWidgetComponent()
 {
 }
+
+
+void UVRStereoWidgetComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	if (EndPlayReason == EEndPlayReason::EndPlayInEditor || EndPlayReason == EEndPlayReason::Quit)
+	{
+		//FStereoLayerAdditionalFlagsManager::Destroy();
+	}
+}
+
 
 void UVRStereoWidgetComponent::BeginDestroy()
 {
@@ -722,6 +736,13 @@ void UVRStereoWidgetComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		LayerDsec.Flags |= (bSupportsDepth) ? IStereoLayers::LAYER_FLAG_SUPPORT_DEPTH : 0;
 		LayerDsec.Flags |= (!bCurrVisible) ? IStereoLayers::LAYER_FLAG_HIDDEN : 0;
 
+		// Would love to implement but they aren't exporting the symbols
+		/*TSharedPtr<FStereoLayerAdditionalFlagsManager> FlagsManager = FStereoLayerAdditionalFlagsManager::Get();
+		for (FName& Flag : AdditionalFlags)
+		{
+			LayerDsec.Flags |= FlagsManager->GetFlagValue(Flag);
+		}*/
+
 		// Fix this later when WorldLocked is no longer wrong.
 		switch (Space)
 		{
@@ -851,7 +872,11 @@ public:
 	{
 		bWillEverBeLit = false;
 		bCreateSceneProxy = InComponent->bShouldCreateProxy;
-		MaterialRelevance = MaterialInstance->GetRelevance(GetScene().GetFeatureLevel());
+
+		if (MaterialInstance)
+		{
+			MaterialRelevance = MaterialInstance->GetRelevance(GetScene().GetFeatureLevel());
+		}
 	}
 
 	// FPrimitiveSceneProxy interface.
@@ -875,12 +900,12 @@ public:
 		{
 			ParentMaterialProxy = WireframeMaterialInstance;
 		}
-		else
+		else if (MaterialInstance != nullptr)
 		{
 			ParentMaterialProxy = MaterialInstance->GetRenderProxy();
 		}
 #else
-		FMaterialRenderProxy* ParentMaterialProxy = MaterialInstance->GetRenderProxy();
+		FMaterialRenderProxy* ParentMaterialProxy = MaterialInstance ? MaterialInstance->GetRenderProxy() : nullptr;
 #endif
 
 		//FSpriteTextureOverrideRenderProxy* TextureOverrideMaterialProxy = new FSpriteTextureOverrideRenderProxy(ParentMaterialProxy,
@@ -901,10 +926,10 @@ public:
 			{
 				if (GeometryMode == EWidgetGeometryMode::Plane)
 				{
-					float U = -RenderTarget->SizeX * Pivot.X;
-					float V = -RenderTarget->SizeY * Pivot.Y;
-					float UL = RenderTarget->SizeX * (1.0f - Pivot.X);
-					float VL = RenderTarget->SizeY * (1.0f - Pivot.Y);
+					float U = -RenderTarget->SizeX * static_cast<float>(Pivot.X);
+					float V = -RenderTarget->SizeY * static_cast<float>(Pivot.Y);
+					float UL = RenderTarget->SizeX * (1.0f - static_cast<float>(Pivot.X));
+					float VL = RenderTarget->SizeY * (1.0f - static_cast<float>(Pivot.Y));
 
 					int32 VertexIndices[4];
 
@@ -937,13 +962,13 @@ public:
 					const int32 NumSegments = FMath::Lerp(4, 32, ArcAngle / PI);
 
 
-					const float Radius = RenderTarget->SizeX / ArcAngle;
-					const float Apothem = Radius * FMath::Cos(0.5f*ArcAngle);
-					const float ChordLength = 2.0f * Radius * FMath::Sin(0.5f*ArcAngle);
+					const double Radius = RenderTarget->SizeX / ArcAngle;
+					const double Apothem = Radius * FMath::Cos(0.5 * ArcAngle);
+					const double ChordLength = 2.0f * Radius * FMath::Sin(0.5 * ArcAngle);
 
-					const float PivotOffsetX = ChordLength * (0.5 - Pivot.X);
-					const float V = -RenderTarget->SizeY * Pivot.Y;
-					const float VL = RenderTarget->SizeY * (1.0f - Pivot.Y);
+					const double PivotOffsetX = ChordLength * (0.5 - Pivot.X);
+					const double V = -RenderTarget->SizeY * Pivot.Y;
+					const double VL = RenderTarget->SizeY * (1.0 - Pivot.Y);
 
 					int32 VertexIndices[4];
 
@@ -953,7 +978,7 @@ public:
 
 						if (VisibilityMap & (1 << ViewIndex))
 						{
-							const float RadiansPerStep = ArcAngle / NumSegments;
+							const double RadiansPerStep = ArcAngle / NumSegments;
 
 							FVector LastTangentX;
 							FVector LastTangentY;
@@ -961,14 +986,14 @@ public:
 
 							for (int32 Segment = 0; Segment < NumSegments; Segment++)
 							{
-								const float Angle = -ArcAngle / 2 + Segment * RadiansPerStep;
-								const float NextAngle = Angle + RadiansPerStep;
+								const double Angle = -ArcAngle / 2 + Segment * RadiansPerStep;
+								const double NextAngle = Angle + RadiansPerStep;
 
 								// Polar to Cartesian
-								const float X0 = Radius * FMath::Cos(Angle) - Apothem;
-								const float Y0 = Radius * FMath::Sin(Angle);
-								const float X1 = Radius * FMath::Cos(NextAngle) - Apothem;
-								const float Y1 = Radius * FMath::Sin(NextAngle);
+								const double X0 = Radius * FMath::Cos(Angle) - Apothem;
+								const double Y0 = Radius * FMath::Sin(Angle);
+								const double X1 = Radius * FMath::Cos(NextAngle) - Apothem;
+								const double Y1 = Radius * FMath::Sin(NextAngle);
 
 								const float U0 = static_cast<float>(Segment) / NumSegments;
 								const float U1 = static_cast<float>(Segment + 1) / NumSegments;
@@ -1100,7 +1125,7 @@ public:
 		bShadowMapped = false;
 	}
 
-	virtual void OnTransformChanged() override
+	virtual void OnTransformChanged(FRHICommandListBase& RHICmdList) override
 	{
 		Origin = GetLocalToWorld().GetOrigin();
 	}
@@ -1112,7 +1137,7 @@ public:
 
 	virtual uint32 GetMemoryFootprint(void) const override { return(sizeof(*this) + GetAllocatedSize()); }
 
-	uint32 GetAllocatedSize(void) const { return(FPrimitiveSceneProxy::GetAllocatedSize()); }
+	SIZE_T GetAllocatedSize(void) const { return(FPrimitiveSceneProxy::GetAllocatedSize()); }
 
 private:
 	FVector Origin;
@@ -1124,7 +1149,7 @@ private:
 	UBodySetup* BodySetup;
 	EWidgetBlendMode BlendMode;
 	EWidgetGeometryMode GeometryMode;
-	float ArcAngle;
+	double ArcAngle;
 	bool bCreateSceneProxy;
 };
 
@@ -1138,10 +1163,13 @@ FPrimitiveSceneProxy* UVRStereoWidgetComponent::CreateSceneProxy()
 
 	if (WidgetRenderer && GetSlateWindow() && GetSlateWindow()->GetContent() != SNullWidget::NullWidget)
 	{
-		RequestRenderUpdate();
-		LastWidgetRenderTime = 0;
+		if (ISlate3DRenderer* SlateRenderer = WidgetRenderer->GetSlateRenderer())
+		{
+			RequestRenderUpdate();
+			LastWidgetRenderTime = 0;
 
-		return new FStereoWidget3DSceneProxy(this, *WidgetRenderer->GetSlateRenderer());
+			return new FStereoWidget3DSceneProxy(this, *SlateRenderer);
+		}
 	}
 
 #if WITH_EDITOR
@@ -1197,7 +1225,7 @@ FPrimitiveSceneProxy* UVRStereoWidgetComponent::CreateSceneProxy()
 			return Result;
 		}
 		virtual uint32 GetMemoryFootprint(void) const override { return(sizeof(*this) + GetAllocatedSize()); }
-		uint32 GetAllocatedSize(void) const { return(FPrimitiveSceneProxy::GetAllocatedSize()); }
+		SIZE_T GetAllocatedSize(void) const { return(FPrimitiveSceneProxy::GetAllocatedSize()); }
 
 	private:
 		const FVector	BoxExtents;

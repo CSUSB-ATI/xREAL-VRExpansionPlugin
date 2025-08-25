@@ -3,11 +3,16 @@
 #include "Grippables/HandSocketComponent.h"
 #include UE_INLINE_GENERATED_CPP_BY_NAME(HandSocketComponent)
 
+#include "CoreMinimal.h"
+#include "UObject/UObjectIterator.h"
 #include "Engine/CollisionProfile.h"
+#include "BoneContainer.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimInstanceProxy.h"
 #include "Animation/PoseSnapshot.h"
 #include "Animation/AnimData/AnimDataModel.h"
+#include "Engine/SkinnedAssetCommon.h"
+#include "Engine/SkinnedAsset.h"
 //#include "VRExpansionFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/PoseableMeshComponent.h"
@@ -17,6 +22,10 @@
 #include "Engine/SkinnedAssetCommon.h"
 #include "Net/UnrealNetwork.h"
 #include "Serialization/CustomVersion.h"
+
+#if WITH_PUSH_MODEL
+#include "Net/Core/PushModel/PushModel.h"
+#endif
 
 DEFINE_LOG_CATEGORY(LogVRHandSocketComponent);
 
@@ -890,10 +899,17 @@ void UHandSocketComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
 void UHandSocketComponent::GetLifetimeReplicatedProps(TArray< class FLifetimeProperty > & OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	
-	DOREPLIFETIME(UHandSocketComponent, bRepGameplayTags);
-	DOREPLIFETIME(UHandSocketComponent, bReplicateMovement);
-	DOREPLIFETIME_CONDITION(UHandSocketComponent, GameplayTags, COND_Custom);
+
+	// For std properties
+	FDoRepLifetimeParams PushModelParams{ COND_None, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(UHandSocketComponent, bRepGameplayTags, PushModelParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UHandSocketComponent, bReplicateMovement, PushModelParams);
+
+	// For properties with special conditions
+	FDoRepLifetimeParams PushModelParamsWithCondition{ COND_Custom, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(UHandSocketComponent, GameplayTags, PushModelParamsWithCondition);
 }
 
 void UHandSocketComponent::PreReplication(IRepChangedPropertyTracker & ChangedPropertyTracker)
@@ -977,4 +993,47 @@ UHandSocketComponent* UHandSocketComponent::GetHandSocketComponentFromObject(UOb
 	}
 
 	return nullptr;
+}
+
+/////////////////////////////////////////////////
+//- Push networking getter / setter functions
+/////////////////////////////////////////////////
+
+void UHandSocketComponent::SetRepGameplayTags(bool bNewRepGameplayTags)
+{
+	bRepGameplayTags = bNewRepGameplayTags;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(UHandSocketComponent, bRepGameplayTags, this);
+#endif
+}
+
+void UHandSocketComponent::SetReplicateMovement(bool bNewReplicateMovement)
+{
+	bReplicateMovement = bNewReplicateMovement;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(UHandSocketComponent, bReplicateMovement, this);
+#endif
+}
+
+FGameplayTagContainer& UHandSocketComponent::GetGameplayTags()
+{
+#if WITH_PUSH_MODEL
+	if (bRepGameplayTags)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(UHandSocketComponent, GameplayTags, this);
+	}
+#endif
+
+	return GameplayTags;
+}
+
+/////////////////////////////////////////////////
+//- End Push networking getter / setter functions
+/////////////////////////////////////////////////
+
+void UHandSocketAnimInstance::NativeInitializeAnimation()
+{
+	Super::NativeInitializeAnimation();
+
+	OwningSocket = Cast<UHandSocketComponent>(GetOwningComponent()->GetAttachParent());
 }

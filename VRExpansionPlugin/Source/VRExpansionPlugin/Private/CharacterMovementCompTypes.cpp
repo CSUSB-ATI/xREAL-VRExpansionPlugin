@@ -118,7 +118,7 @@ void FSavedMove_VRBaseCharacter::SetInitialPosition(ACharacter* C)
 		// Instead, re-purpose it to be the capsule half height
 		if (AVRBaseCharacter* BaseChar = Cast<AVRBaseCharacter>(C))
 		{
-			if (BaseChar->VRReplicateCapsuleHeight)
+			if (BaseChar->GetVRReplicateCapsuleHeight())
 				CapsuleHeight = BaseChar->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
 			else
 				CapsuleHeight = 0.0f;
@@ -372,6 +372,11 @@ bool FVRCharacterNetworkMoveData::Serialize(UCharacterMovementComponent& Charact
 		if (BaseChar->VRMovementReference && !BaseChar->VRMovementReference->bUseClientControlRotation)
 		{
 			bRepRollAndPitch = (Roll != 0 || Pitch != 0);
+		}
+		else
+		{
+			bool bCanRepRollAndPitch = (CharacterOwner && (CharacterOwner->bUseControllerRotationRoll || CharacterOwner->bUseControllerRotationPitch));
+			bRepRollAndPitch = bCanRepRollAndPitch && (Roll != 0 || Pitch != 0);
 		}
 	}
 	else

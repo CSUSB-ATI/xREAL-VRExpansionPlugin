@@ -14,7 +14,13 @@
 #include "VRPathFollowingComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "XRMotionControllerBase.h"
+#include "NavFilters/NavigationQueryFilter.h"
+#include "Misc/EngineNetworkCustomVersion.h"
 //#include "Runtime/Engine/Private/EnginePrivate.h"
+
+#if WITH_PUSH_MODEL
+#include "Net/Core/PushModel/PushModel.h"
+#endif
 
 DEFINE_LOG_CATEGORY(LogBaseVRCharacter);
 
@@ -137,7 +143,7 @@ AVRBaseCharacter::AVRBaseCharacter(const FObjectInitializer& ObjectInitializer)
 
 	// Setting a minimum of every frame for replication consideration (UT uses this value for characters and projectiles).
 	// Otherwise we will get some massive slow downs if the replication is allowed to hit the 2 per second minimum default
-	MinNetUpdateFrequency = 100.0f;
+	SetMinNetUpdateFrequency(100.0f);
 
 	// This is for smooth turning, we have more of a use for this than FPS characters do
 	// Due to roll/pitch almost never being off 0 for VR the cost is just one byte so i'm fine defaulting it here
@@ -235,13 +241,24 @@ void AVRBaseCharacter::PostInitializeComponents()
 void AVRBaseCharacter::GetLifetimeReplicatedProps(TArray< class FLifetimeProperty > & OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME_CONDITION(AVRBaseCharacter, SeatInformation, COND_None);
-	DOREPLIFETIME_CONDITION(AVRBaseCharacter, VRReplicateCapsuleHeight, COND_None);
-	DOREPLIFETIME_CONDITION(AVRBaseCharacter, ReplicatedCapsuleHeight, COND_SimulatedOnly);
+
+	// For std properties
+	FDoRepLifetimeParams PushModelParams{ COND_None, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(AVRBaseCharacter, SeatInformation, PushModelParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AVRBaseCharacter, VRReplicateCapsuleHeight, PushModelParams);
+
+	// For properties with special conditions
+	FDoRepLifetimeParams PushModelParamsWithCondition{ COND_SimulatedOnly, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(AVRBaseCharacter, ReplicatedCapsuleHeight, PushModelParamsWithCondition);
 	
 	DISABLE_REPLICATED_PRIVATE_PROPERTY(AActor, ReplicatedMovement);
 
-	DOREPLIFETIME_CONDITION_NOTIFY(AVRBaseCharacter, ReplicatedMovementVR, COND_SimulatedOrPhysics, REPNOTIFY_Always);
+	// For properties with special conditions
+	FDoRepLifetimeParams PushModelParamsReplicatedMovement{ COND_SimulatedOrPhysics, REPNOTIFY_Always, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(AVRBaseCharacter, ReplicatedMovementVR, PushModelParamsReplicatedMovement);
 }
 
 void AVRBaseCharacter::PreReplication(IRepChangedPropertyTracker & ChangedPropertyTracker)
@@ -282,6 +299,10 @@ void AVRBaseCharacter::Server_ReZeroSeating_Implementation(FTransform_NetQuantiz
 		FVector newLocation = SeatInformation.InitialRelCameraTransform.GetTranslation();
 		SeatInformation.StoredTargetTransform.AddToTranslation(FVector(0, 0, -newLocation.Z));
 	}
+
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AVRBaseCharacter, SeatInformation, this);
+#endif
 
 	OnRep_SeatedCharInfo();
 }
@@ -414,6 +435,11 @@ void AVRBaseCharacter::OnRep_ReplicatedMovement()
 	ReppedMovement.Location = ReplicatedMovementVR.Location;
 	ReppedMovement.Rotation = ReplicatedMovementVR.Rotation;
 
+	ReppedMovement.ServerFrame = ReplicatedMovementVR.ServerFrame;
+	ReppedMovement.ServerPhysicsHandle = ReplicatedMovementVR.ServerPhysicsHandle;
+	ReppedMovement.bRepAcceleration = ReplicatedMovementVR.bRepAcceleration;
+	ReppedMovement.Acceleration = ReplicatedMovementVR.Acceleration;
+
 	Super::OnRep_ReplicatedMovement();
 
 	if (!IsLocallyControlled())
@@ -449,13 +475,23 @@ void AVRBaseCharacter::GatherCurrentMovement()
 	ReplicatedMovementVR.LinearVelocity = ReppedMovement.LinearVelocity;
 	ReplicatedMovementVR.Location = ReppedMovement.Location;
 	ReplicatedMovementVR.Rotation = ReppedMovement.Rotation;
+	ReplicatedMovementVR.ServerFrame = ReppedMovement.ServerFrame;
+	ReplicatedMovementVR.ServerPhysicsHandle = ReppedMovement.ServerPhysicsHandle;
+	ReplicatedMovementVR.bRepAcceleration = ReppedMovement.bRepAcceleration;
+	ReplicatedMovementVR.Acceleration = ReppedMovement.Acceleration;
+
 	ReplicatedMovementVR.bJustTeleported = bFlagTeleported;
 	ReplicatedMovementVR.bJustTeleportedGrips = bFlagTeleportedGrips;
+
 	bFlagTeleported = false;
 	bFlagTeleportedGrips = false;
 	ReplicatedMovementVR.bPausedTracking = bTrackingPaused;
 	ReplicatedMovementVR.PausedTrackingLoc = PausedTrackingLoc;
 	ReplicatedMovementVR.PausedTrackingRot = PausedTrackingRot;
+
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AVRBaseCharacter, ReplicatedMovementVR, this);
+#endif
 
 }
 
@@ -784,7 +820,7 @@ bool AVRBaseCharacter::SetSeatedMode(USceneComponent * SeatParent, bool bSetSeat
 		// I think we can remove the initial value alltogether eventually right?
 		if (!bRetainRoomscale && VRReplicatedCamera)
 		{
-			InitialRelCameraTransform = FTransform(VRReplicatedCamera->ReplicatedCameraTransform.Rotation, VRReplicatedCamera->ReplicatedCameraTransform.Position, VRReplicatedCamera->GetComponentScale());
+			InitialRelCameraTransform = VRReplicatedCamera->GetHMDTrackingTransform();
 		}
 
 		SeatInformation.SeatParent = SeatParent;
@@ -805,6 +841,10 @@ bool AVRBaseCharacter::SetSeatedMode(USceneComponent * SeatParent, bool bSetSeat
 			SeatInformation.StoredTargetTransform.AddToTranslation(FVector(0, 0, -newLocation.Z));
 		}
 
+#if WITH_PUSH_MODEL
+		MARK_PROPERTY_DIRTY_FROM_NAME(AVRBaseCharacter, SeatInformation, this);
+#endif
+
 		//SetReplicateMovement(false);/ / No longer doing this, allowing it to replicate down to simulated clients now instead
 	}
 	else
@@ -815,6 +855,9 @@ bool AVRBaseCharacter::SetSeatedMode(USceneComponent * SeatParent, bool bSetSeat
 		//SetReplicateMovement(true); // No longer doing this, allowing it to replicate down to simulated clients now instead
 		SeatInformation.bSitting = false;
 	}
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AVRBaseCharacter, SeatInformation, this);
+#endif
 
 	OnRep_SeatedCharInfo(); // Call this on server side because it won't call itself
 	NotifyOfTeleport(); // Teleport the controllers
@@ -970,7 +1013,7 @@ FVector AVRBaseCharacter::SetActorLocationAndRotationVR(FVector NewLoc, FRotator
 FVector AVRBaseCharacter::SetActorLocationVR(FVector NewLoc, bool bTeleport, bool bSetCapsuleLocation)
 {
 	FVector NewLocation;
-	FRotator NewRotation;
+	//FRotator NewRotation;
 	FVector PivotOffsetVal = (bSetCapsuleLocation ? GetVRLocation_Inline() : GetProjectedVRLocation()) - GetActorLocation();
 	PivotOffsetVal.Z = 0.0f;
 
@@ -1204,4 +1247,111 @@ void AVRBaseCharacter::StopNavigationMovement()
 		// not ignore OnRequestFinished notify that's going to be sent out due to this call
 		pathComp->AbortMove(*this, FPathFollowingResultFlags::MovementStop | FPathFollowingResultFlags::ForcedScript);
 	}
+}
+
+void AVRBaseCharacter::SetVRReplicateCapsuleHeight(bool bNewVRReplicateCapsuleHeight)
+{
+	VRReplicateCapsuleHeight = bNewVRReplicateCapsuleHeight;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(AVRBaseCharacter, VRReplicateCapsuleHeight, this);
+#endif
+}
+
+bool FRepMovementVRCharacter::NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess)
+{
+	Ar.UsingCustomVersion(FEngineNetworkCustomVersion::Guid);
+
+	FRepMovement BaseSettings = Owner ? Owner->GetReplicatedMovement() : FRepMovement();
+
+	// pack bitfield with flags
+	const bool bServerFrameAndHandleSupported = Ar.EngineNetVer() >= FEngineNetworkCustomVersion::RepMoveServerFrameAndHandle && Ar.EngineNetVer() != FEngineNetworkCustomVersion::Ver21AndViewPitchOnly_DONOTUSE;
+	uint8 Flags = (bSimulatedPhysicSleep << 0) | (bRepPhysics << 1) | (bJustTeleported << 2) | (bJustTeleportedGrips << 3) | (bPausedTracking << 4);
+	Ar.SerializeBits(&Flags, 5);
+	bSimulatedPhysicSleep = (Flags & (1 << 0)) ? 1 : 0;
+	bRepPhysics = (Flags & (1 << 1)) ? 1 : 0;
+	const bool bRepServerFrame = (Flags & (1 << 2) && bServerFrameAndHandleSupported) ? 1 : 0;
+	const bool bRepServerHandle = (Flags & (1 << 3) && bServerFrameAndHandleSupported) ? 1 : 0;
+
+	bJustTeleported = (Flags & (1 << 2)) ? 1 : 0;
+	bJustTeleportedGrips = (Flags & (1 << 3)) ? 1 : 0;
+	bPausedTracking = (Flags & (1 << 4)) ? 1 : 0;
+
+	bOutSuccess = true;
+
+	if (bPausedTracking)
+	{
+		bOutSuccess &= PausedTrackingLoc.NetSerialize(Ar, Map, bOutSuccess);
+
+		uint16 Yaw = 0;
+		if (Ar.IsSaving())
+		{
+			Yaw = FRotator::CompressAxisToShort(PausedTrackingRot);
+			Ar << Yaw;
+		}
+		else
+		{
+			Ar << Yaw;
+			PausedTrackingRot = Yaw;
+		}
+
+	}
+
+	// update location, rotation, linear velocity
+	bOutSuccess &= SerializeQuantizedVector(Ar, Location, BaseSettings.LocationQuantizationLevel);
+
+	switch (BaseSettings.RotationQuantizationLevel)
+	{
+	case ERotatorQuantization::ByteComponents:
+	{
+		Rotation.SerializeCompressed(Ar);
+		break;
+	}
+
+	case ERotatorQuantization::ShortComponents:
+	{
+		Rotation.SerializeCompressedShort(Ar);
+		break;
+	}
+	}
+
+	bOutSuccess &= SerializeQuantizedVector(Ar, LinearVelocity, BaseSettings.VelocityQuantizationLevel);
+
+	// update angular velocity if required
+	if (bRepPhysics)
+	{
+		bOutSuccess &= SerializeQuantizedVector(Ar, AngularVelocity, BaseSettings.VelocityQuantizationLevel);
+	}
+
+	if (bRepServerFrame)
+	{
+		uint32 uServerFrame = (uint32)ServerFrame;
+		Ar.SerializeIntPacked(uServerFrame);
+		ServerFrame = (int32)uServerFrame;
+	}
+
+	if (bRepServerHandle)
+	{
+		uint32 uServerPhysicsHandle = (uint32)ServerPhysicsHandle;
+		Ar.SerializeIntPacked(uServerPhysicsHandle);
+		ServerPhysicsHandle = (int32)uServerPhysicsHandle;
+	}
+
+	if (Ar.EngineNetVer() >= FEngineNetworkCustomVersion::RepMoveOptionalAcceleration)
+	{
+		uint8 AccelFlags = (bRepAcceleration << 0);
+		Ar.SerializeBits(&AccelFlags, 1);
+		bRepAcceleration = (AccelFlags & (1 << 0)) ? 1 : 0;
+
+		if (bRepAcceleration)
+		{
+			// Note that we're using the same quantization as Velocity, since the units are commonly on the same order
+			bOutSuccess &= SerializeQuantizedVector(Ar, Acceleration, VelocityQuantizationLevel);
+		}
+	}
+	else if (Ar.IsLoading())
+	{
+		bRepAcceleration = false;
+	}
+
+	return true;
 }

@@ -4,7 +4,7 @@
 #include UE_INLINE_GENERATED_CPP_BY_NAME(VRFullScreenUserWidget)
 
 //#include "Components/PostProcessComponent.h"
-//#include "Engine/Engine.h"
+#include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -90,7 +90,7 @@ namespace
 
 			void RemoveWidget(UVRFullScreenUserWidget* InWidget)
 			{
-				WidgetsToHide.RemoveSingleSwap(InWidget, false);
+				WidgetsToHide.RemoveSingleSwap(InWidget, EAllowShrinking::No);
 			}
 
 		private:

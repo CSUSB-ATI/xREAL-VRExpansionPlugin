@@ -7,7 +7,9 @@
 #include "GameplayTagAssetInterface.h"
 #include "Components/SceneComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/BoneReference.h"
 #include "Misc/Guid.h"
+
 #include "HandSocketComponent.generated.h"
 
 class USkeletalMeshComponent;
@@ -409,6 +411,8 @@ public:
 		TagContainer = GameplayTags;
 	}
 
+	protected:
+
 	/** Tags that are set on this object */
 	UPROPERTY(EditAnywhere, Replicated, BlueprintReadWrite, Category = "GameplayTags")
 		FGameplayTagContainer GameplayTags;
@@ -422,6 +426,14 @@ public:
 	// Overrides the default of : true and allows for controlling it like in an actor, should be default of off normally with grippable components
 	UPROPERTY(EditAnywhere, Replicated, BlueprintReadWrite, Category = "VRGripInterface|Replication")
 		bool bReplicateMovement;
+
+	public:
+		FGameplayTagContainer& GetGameplayTags();
+
+		void SetRepGameplayTags(bool NewRepGameplayTags);
+		inline bool GetRepGameplayTags() { return bRepGameplayTags; };
+		void SetReplicateMovement(bool NewReplicateMovement);
+		inline bool GetReplicateMovement() { return bReplicateMovement; };
 
 	/** mesh component to indicate hand placement */
 #if WITH_EDITORONLY_DATA
@@ -468,10 +480,5 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, transient, Category = "Socket Data")
 		TObjectPtr<UHandSocketComponent> OwningSocket;
 
-	virtual void NativeInitializeAnimation() override
-	{
-		Super::NativeInitializeAnimation();
-
-		OwningSocket = Cast<UHandSocketComponent>(GetOwningComponent()->GetAttachParent());
-	}
+	virtual void NativeInitializeAnimation() override;
 };

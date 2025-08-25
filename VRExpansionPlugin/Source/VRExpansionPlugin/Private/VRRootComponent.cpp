@@ -6,6 +6,8 @@
 //#include "Runtime/Engine/Private/EnginePrivate.h"
 //#include "WorldCollision.h"
 #include "PhysicsPublic.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Engine/ScopedMovementUpdate.h"
 #include "SceneManagement.h"
 #include "PrimitiveSceneProxy.h"
@@ -13,7 +15,9 @@
 #include "IHeadMountedDisplay.h"
 #include "IXRTrackingSystem.h"
 #include "VRCharacter.h"
+#include "Engine/OverlapResult.h"
 #include "Algo/Copy.h"
+#include "AI/Navigation/NavigationRelevantData.h"
 
 #include "Components/PrimitiveComponent.h"
 
@@ -310,6 +314,7 @@ UVRRootComponent::UVRRootComponent(const FObjectInitializer& ObjectInitializer)
 	SetCanEverAffectNavigation(false);
 	bDynamicObstacle = true;
 
+	LineThickness = 1.25f;
 	//bOffsetByHMD = false;
 }
 
@@ -333,6 +338,7 @@ public:
 		, bSimulating(false)
 		//, OffsetComponentToWorld(InComponent->OffsetComponentToWorld)
 		, LocalToWorld(InComponent->OffsetComponentToWorld.ToMatrixWithScale())
+		, LineThickness(InComponent->GetLineThickness())
 	{
 		bWillEverBeLit = false;
 	}
@@ -357,14 +363,14 @@ public:
 				// If in editor views, lets offset the capsule upwards so that it views correctly
 				if (bSimulating)
 				{
-					DrawWireCapsule(PDI, LocalToWorld.GetOrigin() - FVector(0.f, 0.f, CapsuleHalfHeight), LocalToWorld.GetUnitAxis(EAxis::X), LocalToWorld.GetUnitAxis(EAxis::Y), LocalToWorld.GetUnitAxis(EAxis::Z), DrawCapsuleColor, CapsuleRadius, CapsuleHalfHeight, CapsuleSides, SDPG_World);
+					DrawWireCapsule(PDI, LocalToWorld.GetOrigin() - FVector(0.f, 0.f, CapsuleHalfHeight), LocalToWorld.GetUnitAxis(EAxis::X), LocalToWorld.GetUnitAxis(EAxis::Y), LocalToWorld.GetUnitAxis(EAxis::Z), DrawCapsuleColor, CapsuleRadius, CapsuleHalfHeight, CapsuleSides, SDPG_World, LineThickness);
 				}
 				else if (UseEditorCompositing(View))
 				{
-					DrawWireCapsule(PDI, LocalToWorld.GetOrigin() /*+ FVector(0.f, 0.f, CapsuleHalfHeight)*/, LocalToWorld.GetUnitAxis(EAxis::X), LocalToWorld.GetUnitAxis(EAxis::Y), LocalToWorld.GetUnitAxis(EAxis::Z), DrawCapsuleColor, CapsuleRadius, CapsuleHalfHeight, CapsuleSides, SDPG_World, 1.25f);
+					DrawWireCapsule(PDI, LocalToWorld.GetOrigin() /*+ FVector(0.f, 0.f, CapsuleHalfHeight)*/, LocalToWorld.GetUnitAxis(EAxis::X), LocalToWorld.GetUnitAxis(EAxis::Y), LocalToWorld.GetUnitAxis(EAxis::Z), DrawCapsuleColor, CapsuleRadius, CapsuleHalfHeight, CapsuleSides, SDPG_World, LineThickness);
 				}
 				else
-					DrawWireCapsule(PDI, LocalToWorld.GetOrigin(), LocalToWorld.GetUnitAxis(EAxis::X), LocalToWorld.GetUnitAxis(EAxis::Y), LocalToWorld.GetUnitAxis(EAxis::Z), DrawCapsuleColor, CapsuleRadius, CapsuleHalfHeight, CapsuleSides, SDPG_World, 1.25f);					
+					DrawWireCapsule(PDI, LocalToWorld.GetOrigin(), LocalToWorld.GetUnitAxis(EAxis::X), LocalToWorld.GetUnitAxis(EAxis::Y), LocalToWorld.GetUnitAxis(EAxis::Z), DrawCapsuleColor, CapsuleRadius, CapsuleHalfHeight, CapsuleSides, SDPG_World, LineThickness);
 			}
 		}
 	}
@@ -405,6 +411,7 @@ private:
 	bool bSimulating = false;
 	//FTransform OffsetComponentToWorld;
 	FMatrix LocalToWorld;
+	const float	LineThickness;
 };
 
 FPrimitiveSceneProxy* UVRRootComponent::CreateSceneProxy()
@@ -461,7 +468,7 @@ void UVRRootComponent::UpdateCharacterCapsuleOffset()
 {
 	if (owningVRChar && !owningVRChar->bRetainRoomscale && owningVRChar->NetSmoother)
 	{
-		if (!FMath::IsNearlyEqual(LastCapsuleHalfHeight, CapsuleHalfHeight))
+		if (bCenterCapsuleOnHMD || !FMath::IsNearlyEqual(LastCapsuleHalfHeight, CapsuleHalfHeight))
 		{
 			owningVRChar->NetSmoother->SetRelativeLocation(GetTargetHeightOffset(), false, nullptr, ETeleportType::TeleportPhysics);
 
@@ -550,9 +557,10 @@ void UVRRootComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, 
 		if (bRetainRoomscale)
 		{
 			// Pre-Process this for network sends
-			curCameraLoc.X = FMath::RoundToFloat(curCameraLoc.X * 100.f) / 100.f;
-			curCameraLoc.Y = FMath::RoundToFloat(curCameraLoc.Y * 100.f) / 100.f;
-			curCameraLoc.Z = FMath::RoundToFloat(curCameraLoc.Z * 100.f) / 100.f;
+			UE::Net::QuantizeVector(100, curCameraLoc);
+			//curCameraLoc.X = FMath::RoundToFloat(curCameraLoc.X * 100.f) / 100.f;
+			//curCameraLoc.Y = FMath::RoundToFloat(curCameraLoc.Y * 100.f) / 100.f;
+			//curCameraLoc.Z = FMath::RoundToFloat(curCameraLoc.Z * 100.f) / 100.f;
 		}
 		
 
@@ -586,9 +594,23 @@ void UVRRootComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, 
 			Params.bFindInitialOverlaps = true;
 			bool bBlockingHit = false;
 
-			if (bUseWalkingCollisionOverride && bRetainRoomscale)
+			if (bUseWalkingCollisionOverride /* && bRetainRoomscale*/)
 			{
-				FVector TargetWorldLocation = OffsetComponentToWorld.GetLocation();
+				FVector TargetWorldLocation = FVector::ZeroVector;
+				
+				if (bRetainRoomscale)
+				{
+					TargetWorldLocation = OffsetComponentToWorld.GetLocation();
+				}
+				else // Not Retained Roomscale
+				{
+					FVector NewLocation = StoredCameraRotOffset.RotateVector(FVector(VRCapsuleOffset.X, VRCapsuleOffset.Y, 0.0f)) + curCameraLoc;
+					FVector PlanerLocation = NewLocation - lastCameraLoc;
+					PlanerLocation.Z = 0.0f;
+					DifferenceFromLastFrame = GetComponentTransform().TransformVector(PlanerLocation);
+					TargetWorldLocation = LastPosition + DifferenceFromLastFrame;
+				}
+				
 				bool bAllowWalkingCollision = false;
 				if (CharMove != nullptr)
 				{
@@ -625,9 +647,10 @@ void UVRRootComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, 
 					lastCameraRot = curCameraRot;
 
 					//DifferenceFromLastFrame = (NextTransform.GetLocation() - LastPosition);// .GetSafeNormal2D();
-					DifferenceFromLastFrame.X = FMath::RoundToFloat(DifferenceFromLastFrame.X * 100.f) / 100.f;
-					DifferenceFromLastFrame.Y = FMath::RoundToFloat(DifferenceFromLastFrame.Y * 100.f) / 100.f;
-					DifferenceFromLastFrame.Z = FMath::RoundToFloat(DifferenceFromLastFrame.Z * 100.f) / 100.f;
+					UE::Net::QuantizeVector(100, DifferenceFromLastFrame);
+					//DifferenceFromLastFrame.X = FMath::RoundToFloat(DifferenceFromLastFrame.X * 100.f) / 100.f;
+					//DifferenceFromLastFrame.Y = FMath::RoundToFloat(DifferenceFromLastFrame.Y * 100.f) / 100.f;
+					//DifferenceFromLastFrame.Z = FMath::RoundToFloat(DifferenceFromLastFrame.Z * 100.f) / 100.f;
 					//DifferenceFromLastFrame.Z = 0.0f; // Reset Z to zero, its not used anyway and this lets me reuse the Z component for capsule half height
 				}
 				else
@@ -650,9 +673,13 @@ void UVRRootComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, 
 					{
 						// I'm limiting it to a -100 - 100 unit range in case people somehow skip tracking so far that this multiplication
 						// Would overflow the max/min values of a float. It shouldn't ever be harmful as that is a loooot of travel in one tick
-						DifferenceFromLastFrame.X = FMath::RoundToFloat(FMath::Clamp(DifferenceFromLastFrame.X, -100.0f, 100.0f) * 10000.f) / 10000.f;
-						DifferenceFromLastFrame.Y = FMath::RoundToFloat(FMath::Clamp(DifferenceFromLastFrame.Y, -100.0f, 100.0f) * 10000.f) / 10000.f;
-						DifferenceFromLastFrame.Z = FMath::RoundToFloat(FMath::Clamp(DifferenceFromLastFrame.Z, -100.0f, 100.0f) * 10000.f) / 10000.f;
+						DifferenceFromLastFrame.X = FMath::Clamp(DifferenceFromLastFrame.X, -100.0f, 100.0f);
+						DifferenceFromLastFrame.Y = FMath::Clamp(DifferenceFromLastFrame.Y, -100.0f, 100.0f);
+						DifferenceFromLastFrame.Z = FMath::Clamp(DifferenceFromLastFrame.Z, -100.0f, 100.0f);
+						UE::Net::QuantizeVector(10000, DifferenceFromLastFrame);
+						//DifferenceFromLastFrame.X = FMath::RoundToFloat(FMath::Clamp(DifferenceFromLastFrame.X, -100.0f, 100.0f) * 10000.f) / 10000.f;
+						//DifferenceFromLastFrame.Y = FMath::RoundToFloat(FMath::Clamp(DifferenceFromLastFrame.Y, -100.0f, 100.0f) * 10000.f) / 10000.f;
+						//DifferenceFromLastFrame.Z = FMath::RoundToFloat(FMath::Clamp(DifferenceFromLastFrame.Z, -100.0f, 100.0f) * 10000.f) / 10000.f;
 						//DifferenceFromLastFrame.Z = 0.0f; // Reset Z to zero, its not used anyway and this lets me reuse the Z component for capsule half height
 					}
 				}
@@ -1062,7 +1089,7 @@ bool UVRRootComponent::MoveComponentImpl(const FVector& Delta, const FQuat& NewR
 
 					if (TestHit.bBlockingHit)
 					{
-						if (!ShouldIgnoreHitResult(MyWorld, bAllowSimulatingCollision, TestHit, Delta, Actor, MoveFlags))
+						if (!ShouldIgnoreHitResult(MyWorld, bAllowSimulatingCollision, TestHit, Delta, Actor, MoveFlags) && !ShouldComponentIgnoreHitResult(TestHit, MoveFlags))
 						{
 							if (TestHit.bStartPenetrating)
 							{
@@ -1138,8 +1165,7 @@ bool UVRRootComponent::MoveComponentImpl(const FVector& Delta, const FQuat& NewR
 					// Remove any pending overlaps after this point, we are not going as far as we swept.
 					if (FirstNonInitialOverlapIdx != INDEX_NONE)
 					{
-						const bool bAllowShrinking = false;
-						PendingOverlaps.SetNum(FirstNonInitialOverlapIdx, bAllowShrinking);
+						PendingOverlaps.SetNum(FirstNonInitialOverlapIdx, EAllowShrinking::No);
 					}
 				}
 			}
@@ -1378,14 +1404,13 @@ bool UVRRootComponent::UpdateOverlapsImpl(const TOverlapArrayView* NewPendingOve
 				for (int32 CompIdx = 0; CompIdx < OldOverlappingComponentPtrs.Num() && NewOverlappingComponentPtrs.Num() > 0; ++CompIdx)
 				{
 					// RemoveAtSwap is ok, since it is not necessary to maintain order
-					const bool bAllowShrinking = false;
 
 					const FOverlapInfo* SearchItem = OldOverlappingComponentPtrs[CompIdx];
 					const int32 NewElementIdx = IndexOfOverlapFast(NewOverlappingComponentPtrs, SearchItem);
 					if (NewElementIdx != INDEX_NONE)
 					{
-						NewOverlappingComponentPtrs.RemoveAtSwap(NewElementIdx, 1, bAllowShrinking);
-						OldOverlappingComponentPtrs.RemoveAtSwap(CompIdx, 1, bAllowShrinking);
+						NewOverlappingComponentPtrs.RemoveAtSwap(NewElementIdx, 1, EAllowShrinking::No);
+						OldOverlappingComponentPtrs.RemoveAtSwap(CompIdx, 1, EAllowShrinking::No);
 						--CompIdx;
 					}
 				}
@@ -1415,7 +1440,7 @@ bool UVRRootComponent::UpdateOverlapsImpl(const TOverlapArrayView* NewPendingOve
 							const int32 StaleElementIndex = IndexOfOverlapFast(OverlappingComponents, OtherOverlap);
 							if (StaleElementIndex != INDEX_NONE)
 							{
-								OverlappingComponents.RemoveAtSwap(StaleElementIndex, 1, bAllowShrinking);
+								OverlappingComponents.RemoveAtSwap(StaleElementIndex, 1, bAllowShrinking ? EAllowShrinking::Yes : EAllowShrinking::No);
 							}
 						}
 					}
@@ -1517,7 +1542,7 @@ bool UVRRootComponent::IsLocallyControlled() const
 	{
 		if (GetNetMode() < ENetMode::NM_Client)
 		{
-			if (owningVRChar->VRReplicateCapsuleHeight)
+			if (owningVRChar->GetVRReplicateCapsuleHeight())
 			{
 				owningVRChar->ReplicatedCapsuleHeight.CapsuleHeight = CapsuleHalfHeight;
 			}
@@ -1528,7 +1553,7 @@ bool UVRRootComponent::IsLocallyControlled() const
 		// Simulated proxies should already have the new height from the server
 		if (!owningVRChar->bRetainRoomscale && (owningVRChar->GetNetMode() < ENetMode::NM_Client || IsLocallyControlled()))
 		{
-			MoveComponent(this->GetComponentQuat().GetUpVector() * (Offset * this->GetComponentScale().Z), GetComponentQuat(), true, nullptr, EMoveComponentFlags::MOVECOMP_NoFlags, ETeleportType::TeleportPhysics);
+			MoveComponent(this->GetComponentQuat().GetUpVector() * (Offset * this->GetComponentScale().Z), GetComponentQuat(), false, nullptr, EMoveComponentFlags::MOVECOMP_NoFlags, ETeleportType::TeleportPhysics);
 		}
 		/*else
 		{
@@ -1651,7 +1676,7 @@ bool UVRRootComponent::ConvertSweptOverlapsToCurrentOverlapsVR(
 							// Not handled yet. We could do it by checking every body explicitly and track each body index in the overlap test, but this seems like a rare need.
 							return false;
 						}
-						else if (Cast<USkeletalMeshComponent>(OtherPrimitive) || Cast<USkeletalMeshComponent>(this))
+						else if (Cast<USkeletalMeshComponent>(OtherPrimitive) /* || Cast<USkeletalMeshComponent>(this)*/)
 						{
 							// SkeletalMeshComponent does not support this operation, and would return false in the test when an actual query could return true.
 							return false;

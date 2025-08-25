@@ -3,6 +3,11 @@
 #include "VRPathFollowingComponent.h"
 #include UE_INLINE_GENERATED_CPP_BY_NAME(VRPathFollowingComponent)
 
+#include "AI/Navigation/NavigationTypes.h"
+#include "AI/Navigation/PathFollowingAgentInterface.h"
+
+#include "CoreMinimal.h"
+#include "Engine/World.h"
 //#include "Runtime/Engine/Private/EnginePrivate.h"
 
 //#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION >= 13
@@ -14,7 +19,7 @@
 
 DEFINE_LOG_CATEGORY(LogPathFollowingVR);
 
-void UVRPathFollowingComponent::SetMovementComponent(UNavMovementComponent* MoveComp)
+/*void UVRPathFollowingComponent::SetMovementComponent(UNavMovementComponent* MoveComp)
 {
 	Super::SetMovementComponent(MoveComp);
 
@@ -24,8 +29,23 @@ void UVRPathFollowingComponent::SetMovementComponent(UNavMovementComponent* Move
 	{
 		OnRequestFinished.AddUObject(VRMovementComp, &UVRBaseCharacterMovementComponent::OnMoveCompleted);
 	}
-}
+}*/
 
+void UVRPathFollowingComponent::SetNavMovementInterface(INavMovementInterface* NavMoveInterface)
+{
+	Super::SetNavMovementInterface(NavMoveInterface);
+
+	if (NavMovementInterface.IsValid() && NavMovementInterface->GetOwnerAsObject())
+	{
+		if (AVRBaseCharacter* VRMovement = Cast<AVRBaseCharacter>(NavMovementInterface->GetOwnerAsObject()))
+		{ 
+			if (IsValid(VRMovement->VRMovementReference))
+			{
+				OnRequestFinished.AddUObject(VRMovement->VRMovementReference, &UVRBaseCharacterMovementComponent::OnMoveCompleted);
+			}
+		}
+	}
+}
 
 void UVRPathFollowingComponent::GetDebugStringTokens(TArray<FString>& Tokens, TArray<EPathFollowingDebugTokens::Type>& Flags) const
 {
@@ -80,52 +100,8 @@ void UVRPathFollowingComponent::GetDebugStringTokens(TArray<FString>& Tokens, TA
 	Flags.Add(bFailedHeight ? EPathFollowingDebugTokens::FailedValue : EPathFollowingDebugTokens::PassedValue);
 }
 
-void UVRPathFollowingComponent::PauseMove(FAIRequestID RequestID, EPathFollowingVelocityMode VelocityMode)
-{
-	//UE_VLOG(GetOwner(), LogPathFollowing, Log, TEXT("PauseMove: RequestID(%u)"), RequestID);
-	if (Status == EPathFollowingStatus::Paused)
-	{
-		return;
-	}
 
-	if (RequestID.IsEquivalent(GetCurrentRequestId()))
-	{
-		if ((VelocityMode == EPathFollowingVelocityMode::Reset) && MovementComp && HasMovementAuthority())
-		{
-			MovementComp->StopMovementKeepPathing();
-		}
-
-		LocationWhenPaused = MovementComp ? (VRMovementComp != nullptr ? VRMovementComp->GetActorFeetLocationVR() : MovementComp->GetActorFeetLocation()) : FVector::ZeroVector;
-		PathTimeWhenPaused = Path.IsValid() ? Path->GetTimeStamp() : 0.;
-		Status = EPathFollowingStatus::Paused;
-
-		UpdateMoveFocus();
-	}
-}
-
-
-
-bool UVRPathFollowingComponent::ShouldCheckPathOnResume() const
-{
-	bool bCheckPath = true;
-	if (MovementComp != NULL)
-	{
-		float AgentRadius = 0.0f, AgentHalfHeight = 0.0f;
-		MovementComp->GetOwner()->GetSimpleCollisionCylinder(AgentRadius, AgentHalfHeight);
-
-		const FVector CurrentLocation = (VRMovementComp != nullptr ? VRMovementComp->GetActorFeetLocation() : MovementComp->GetActorFeetLocation());
-		const FVector::FReal DeltaMove2DSq = (CurrentLocation - LocationWhenPaused).SizeSquared2D();
-		const FVector::FReal DeltaZ = FMath::Abs(CurrentLocation.Z - LocationWhenPaused.Z);
-		if (DeltaMove2DSq < FMath::Square(AgentRadius) && DeltaZ < (AgentHalfHeight * 0.5))
-		{
-			bCheckPath = false;
-		}
-	}
-
-	return bCheckPath;
-}
-
-int32 UVRPathFollowingComponent::DetermineStartingPathPoint(const FNavigationPath* ConsideredPath) const
+/*int32 UVRPathFollowingComponent::DetermineStartingPathPoint(const FNavigationPath* ConsideredPath) const
 {
 	int32 PickedPathPoint = INDEX_NONE;
 
@@ -190,7 +166,7 @@ bool UVRPathFollowingComponent::UpdateBlockDetection()
 		{
 			LocationSamples.AddZeroed(1);
 		}
-
+		
 		LocationSamples[NextSampleIdx] = (VRMovementComp != nullptr ? VRMovementComp->GetActorFeetLocationBased() : MovementComp->GetActorFeetLocationBased());
 		NextSampleIdx = (NextSampleIdx + 1) % BlockDetectionSampleCount;
 		return true;
@@ -254,8 +230,16 @@ void UVRPathFollowingComponent::UpdatePathSegment()
 			{
 				const FVector AgentLocation = DestinationAgent ? DestinationAgent->GetNavAgentLocation() : DestinationActor->GetActorLocation();
 				// note that the condition below requires GoalLocation to be in world space.
-				const FVector GoalLocation = FQuatRotationTranslationMatrix(DestinationActor->GetActorQuat(), AgentLocation).TransformPosition(MoveOffset);
+				FVector GoalLocation = FQuatRotationTranslationMatrix(DestinationActor->GetActorQuat(), AgentLocation).TransformPosition(MoveOffset);
 
+				if (bMoveToGoalClampedToNavigation && NavigationFilter)
+				{
+					FVector HitLocation;
+					if (MyNavData->Raycast(CurrentLocation, GoalLocation, HitLocation, NavigationFilter))
+					{
+						GoalLocation = HitLocation;
+					}
+				}
 				CurrentDestination.Set(NULL, GoalLocation);
 
 				//UE_VLOG(this, LogPathFollowing, Log, TEXT("Moving directly to move goal rather than following last path segment"));
@@ -292,8 +276,8 @@ void UVRPathFollowingComponent::UpdatePathSegment()
 			if (Path->GetPathPoints().IsValidIndex(MoveSegmentEndIndex) && Path->GetPathPoints().IsValidIndex(MoveSegmentStartIndex))
 			{
 				//LogBlockHelper(GetOwner(), MovementComp, MinAgentRadiusPct, MinAgentHalfHeightPct,
-					//*Path->GetPathPointLocation(MoveSegmentStartIndex),
-					//*Path->GetPathPointLocation(MoveSegmentEndIndex));
+					//Path->GetPathPointLocation(MoveSegmentStartIndex),
+					//Path->GetPathPointLocation(MoveSegmentEndIndex));
 			}
 			else
 			{
@@ -361,6 +345,27 @@ bool UVRPathFollowingComponent::HasReachedCurrentTarget(const FVector& CurrentLo
 		return false;
 	}
 
+	// If the next segment is a link with a custom reach condition, we need to call the HasReachedLinkStart on the link interface.
+	if (bMoveSegmentIsUsingCustomLinkReachCondition)
+	{
+		if (const INavLinkCustomInterface* MoveSegmentCustomLink = Cast<const INavLinkCustomInterface>(MoveSegmentCustomLinkOb.Get()))
+		{
+			if (ensureMsgf(Path.IsValid(), TEXT("%hs: Path should be valid when we get here. Owner [%s]."), __FUNCTION__, *GetNameSafe(GetOwner())))
+			{
+				const FNavPathPoint& LinkStart = Path->GetPathPoints()[MoveSegmentEndIndex];
+				if (Path->GetPathPoints().IsValidIndex(MoveSegmentEndIndex + 1))
+				{
+					const FNavPathPoint& LinkEnd = Path->GetPathPoints()[MoveSegmentEndIndex + 1];
+					return MoveSegmentCustomLink->HasReachedLinkStart(this, CurrentLocation, LinkStart, LinkEnd);
+				}
+				else
+				{
+					UE_LOG(LogPathFollowing, Error, TEXT("%hs: NavLink has a start, but no end. Custom reach condition won't be called. NavLinkID [%llu] - LinkStartPos [%s] - Owner [%s]"), __FUNCTION__, LinkStart.CustomNavLinkId.GetId(), *LinkStart.Location.ToString(), *GetNameSafe(GetOwner()));
+				}
+			}
+		}
+	}
+
 	const FVector CurrentTarget = GetCurrentTargetLocation();
 	const FVector CurrentDirection = GetCurrentDirection();
 
@@ -424,7 +429,7 @@ void UVRPathFollowingComponent::DebugReachTest(float& CurrentDot, float& Current
 
 	const FVector ToGoal = (GoalLocation - AgentLocation);
 	const FVector CurrentDirection = GetCurrentDirection();
-	CurrentDot = FloatCastChecked<float>(FVector::DotProduct(ToGoal.GetSafeNormal(), CurrentDirection), /* Precision */ 1. / 128.);
+	CurrentDot = FloatCastChecked<float>(FVector::DotProduct(ToGoal.GetSafeNormal(), CurrentDirection),  1. / 128.);
 	bDotFailed = (CurrentDot < 0.0f) ? 1 : 0;
 
 	// get cylinder of moving agent
@@ -441,3 +446,4 @@ void UVRPathFollowingComponent::DebugReachTest(float& CurrentDot, float& Current
 	const float UseHeight = GoalHalfHeight + (AgentHalfHeight * MinAgentHalfHeightPct);
 	bHeightFailed = (CurrentHeight > UseHeight) ? 1 : 0;
 }
+*/

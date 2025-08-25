@@ -14,6 +14,7 @@
 
 class UGripMotionControllerComponent;
 class UVRGripScriptBase;
+class UPrimitiveComponent;
 
 // Custom movement modes for the characters
 UENUM(BlueprintType)
@@ -1467,6 +1468,13 @@ public:
 	float LerpSpeed;
 	FTransform OnGripTransform;
 
+	/////////////////////
+	// TMP: Velocity calculation addition for 5.4 #TODO: Remove this when the bug is fixed
+	FVector LinVel = FVector::ZeroVector;
+	FVector RotVel = FVector::ZeroVector;
+	FTransform LastVelWorldTrans; // Identity by default
+	///////////////////////
+
 	UPROPERTY(BlueprintReadWrite, NotReplicated, Category = "Settings")
 	bool bIsLerping;
 
@@ -1550,15 +1558,11 @@ public:
 	}
 
 
-	FORCEINLINE AActor * GetGrippedActor() const
-	{
-		return Cast<AActor>(GrippedObject);
-	}
+	AActor* GetGrippedActor() const;
 
-	FORCEINLINE UPrimitiveComponent * GetGrippedComponent() const
-	{
-		return Cast<UPrimitiveComponent>(GrippedObject);
-	}
+	UPrimitiveComponent* GetGrippedComponent() const;
+
+	UPrimitiveComponent* GetGripPrimitiveComponent() const;
 
 	//Check if a grip is the same as another, the only things I check for are the actor / component
 	//This is here for the Find() function from TArray
@@ -1580,13 +1584,7 @@ public:
 		return false;
 	}
 
-	FORCEINLINE bool operator==(const UPrimitiveComponent * Other) const
-	{
-		if (Other && GrippedObject && GrippedObject == (const UObject*)Other)
-			return true;
-
-		return false;
-	}
+	bool operator==(const UPrimitiveComponent* Other) const;
 
 	FORCEINLINE bool operator==(const UObject * Other) const
 	{
@@ -1868,11 +1866,11 @@ public:
 		bEnableVelocityDrive = ConstraintDrive.bEnableVelocityDrive;
 	}
 
-	void FillTo(FConstraintDrive& ConstraintDrive) const
+	void FillTo(FConstraintDrive& ConstraintDrive, float DampingScaler = 1.0f, float StiffnessScaler = 1.0f) const
 	{
-		ConstraintDrive.Damping = Damping;
-		ConstraintDrive.Stiffness = Stiffness;
-		ConstraintDrive.MaxForce = MaxForceCoefficient * Stiffness;
+		ConstraintDrive.Damping = Damping * DampingScaler;
+		ConstraintDrive.Stiffness = Stiffness * StiffnessScaler;
+		ConstraintDrive.MaxForce = (float)FMath::Clamp<double>((double)ConstraintDrive.Stiffness * (double)MaxForceCoefficient, 0, (double)MAX_FLT);
 		ConstraintDrive.bEnablePositionDrive = bEnablePositionDrive;
 		ConstraintDrive.bEnableVelocityDrive = bEnableVelocityDrive;
 	}
@@ -1929,27 +1927,5 @@ public:
 		return true;
 	}
 
-	bool FillTo(FBPActorPhysicsHandleInformation* HandleInfo) const
-	{
-		if (!HandleInfo)
-			return false;
-
-		XAxisSettings.FillTo(HandleInfo->LinConstraint.XDrive);
-		YAxisSettings.FillTo(HandleInfo->LinConstraint.YDrive);
-		ZAxisSettings.FillTo(HandleInfo->LinConstraint.ZDrive);
-
-		if ((SlerpSettings.bEnablePositionDrive || SlerpSettings.bEnableVelocityDrive))
-		{
-			HandleInfo->AngConstraint.AngularDriveMode = EAngularDriveMode::SLERP;
-			SlerpSettings.FillTo(HandleInfo->AngConstraint.SlerpDrive);
-		}
-		else
-		{
-			HandleInfo->AngConstraint.AngularDriveMode = EAngularDriveMode::TwistAndSwing;
-			TwistSettings.FillTo(HandleInfo->AngConstraint.TwistDrive);
-			SwingSettings.FillTo(HandleInfo->AngConstraint.SwingDrive);
-		}
-
-		return true;
-	}
+	bool FillTo(FBPActorPhysicsHandleInformation* HandleInfo, bool bModifyWithScalers = true) const;
 };

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Console.h"
@@ -174,7 +175,7 @@ protected:
 			int numMessages = OutMessages.Num();
 			if (numMessages > MaxStoredMessages)
 			{
-				OutMessages.RemoveAt(0, numMessages - MaxStoredMessages, true);
+				OutMessages.RemoveAt(0, numMessages - MaxStoredMessages, EAllowShrinking::Yes);
 			}
 			if (OldNumMessages != numMessages)
 				bIsDirty = true;

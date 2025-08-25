@@ -2,6 +2,8 @@
 #include UE_INLINE_GENERATED_CPP_BY_NAME(VRGestureComponent)
 
 #include "VRBaseCharacter.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Components/SplineMeshComponent.h"
 #include "Components/SplineComponent.h"
 #include "Components/LineBatchComponent.h"
@@ -243,7 +245,7 @@ void UVRGestureComponent::CaptureGestureFrame()
 		// Pop off oldest sample
 		if (GestureLog.Samples.Num() >= RecordingBufferSize)
 		{
-			GestureLog.Samples.Pop(false);
+			GestureLog.Samples.Pop(EAllowShrinking::No);
 			bClearLatestSpline = true;
 		}
 		
@@ -598,8 +600,8 @@ bool UGesturesDatabase::ImportSplineAsGesture(USplineComponent * HostSplineCompo
 
 	float LastDistance = 0.f;
 	float ThisDistance = 0.f;
-	FVector LastDistanceV;
-	FVector ThisDistanceV;
+	FVector LastDistanceV = FVector::ZeroVector;
+	FVector ThisDistanceV = FVector::ZeroVector;
 	FVector DistNormal;
 	float DistAlongSegment = 0.f;
 
