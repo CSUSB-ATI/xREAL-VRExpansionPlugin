@@ -7437,10 +7437,6 @@ bool UGripMotionControllerComponent::GripPollControllerState_RenderThread(FVecto
 		EControllerHand HandType;
 		GetHandType(HandType);
 		FName GripSource = (HandType == EControllerHand::Left) ? FName("LeftGrip") : FName("RightGrip");
-<<<<<<< HEAD
-=======
-
->>>>>>> upstream/5.5-Locked
 		CurrentTrackingStatus = PolledMotionController_RenderThread->GetControllerTrackingStatus(PlayerIndex, GripSource);
 		if (PolledMotionController_RenderThread->GetControllerOrientationAndPosition(PlayerIndex, MotionSource, Orientation, Position, WorldToMetersScale))
 		{

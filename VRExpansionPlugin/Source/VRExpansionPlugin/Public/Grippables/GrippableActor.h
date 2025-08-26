@@ -162,7 +162,7 @@ public:
 	inline bool GetAllowIgnoringAttachOnOwner() { return bAllowIgnoringAttachOnOwner; };
 
 	// Should we skip attachment replication (vr settings say we are a client auth grip and our owner is locally controlled)
-	/*inline*/ bool ShouldWeSkipAttachmentReplication(bool bConsiderHeld = true) const;
+	bool ShouldWeSkipAttachmentReplication(bool bConsiderHeld = true) const;
 
 	// Handle fixing some bugs and issues with ReplicateMovement being off
 	virtual void OnRep_AttachmentReplication() override;

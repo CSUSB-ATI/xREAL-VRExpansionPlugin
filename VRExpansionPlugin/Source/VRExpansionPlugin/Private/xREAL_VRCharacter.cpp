@@ -436,7 +436,7 @@ void AxREAL_VRCharacter::PossessedBy(AController *NewController)
     Super::PossessedBy(NewController);
     if (bWasAlreadyPossessed)
     {
-        UHeadMountedDisplayFunctionLibrary::SetTrackingOrigin(EHMDTrackingOrigin::Floor);
+        UHeadMountedDisplayFunctionLibrary::SetTrackingOrigin(EHMDTrackingOrigin::Stage);
     }
     else
     {
@@ -850,7 +850,8 @@ void AxREAL_VRCharacter::MapInput()
     FModifyContextOptions inputOptions = FModifyContextOptions();
     inputOptions.bForceImmediately = true;
     inputOptions.bIgnoreAllPressedKeysUntilRelease = true;
-    InputSubsystem->AddPlayerMappableConfig(InputConfig, inputOptions);
+    //TODO: Change the following to work for UE5.3+ input mapping should be done with user settings?
+    //InputSubsystem->AddPlayerMappableConfig(InputConfig, inputOptions);
 }
 
 void AxREAL_VRCharacter::CalculateRelativeVelocities()
@@ -866,7 +867,6 @@ void AxREAL_VRCharacter::CalculateRelativeVelocities()
 
 void AxREAL_VRCharacter::GetSmoothedVelocityOfObject(FVector CurRelLocation, UPARAM(ref) FVector &LastRelLocation, UPARAM(ref) FVector &RelativeVelocityOut, UPARAM(ref) FVector &LowEndRelativeVelocityOut, bool bRollingAverage)
 {
-    FVector tempVel;
     FVector relativeLocationDifference = CurRelLocation - LastRelLocation;
     FVector ABSVector = FVector(FMath::Abs(relativeLocationDifference.X), FMath::Abs(relativeLocationDifference.Y), FMath::Abs(relativeLocationDifference.Z));
     if (bRollingAverage)
@@ -980,7 +980,7 @@ void AxREAL_VRCharacter::SetupMotionControllers_Implementation()
         UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0)->StartCameraFade(1.0f, 0.0f, 1.0f, FLinearColor::Black, false, false);
 
         MapInput();
-        UHeadMountedDisplayFunctionLibrary::SetTrackingOrigin(EHMDTrackingOrigin::Floor);
+        UHeadMountedDisplayFunctionLibrary::SetTrackingOrigin(EHMDTrackingOrigin::Stage);
         UHeadMountedDisplayFunctionLibrary::SetSpectatorScreenMode(ESpectatorScreenMode::SingleEyeCroppedToFill);
 
         // Set text above controllers to show movement mode
@@ -2430,7 +2430,6 @@ void AxREAL_VRCharacter::SelectObjectFromHitArray(UPARAM(ref) TArray<FHitResult>
             FTransform lOutTransform;
             bool lObjectImplementsInterface, lShouldGrip;
             FName lOutBoneName = Hits[i].BoneName;
-            FVector lImpactPoint;
             lShouldGrip = ShouldGripComponent(hitComponent, bestGripPrio, i > 0, lOutBoneName, RelevantGameplayTags, Hand, lOutObject, lObjectImplementsInterface, lOutTransform, bestGripPrio);
             if (lShouldGrip)
             {
@@ -2713,20 +2712,21 @@ void AxREAL_VRCharacter::ClearGraspingHands()
 // They should already be placed and positioned perfectly for the controller. So we need to offset them in the inverse of the controller profile offset to account for it.
 void AxREAL_VRCharacter::RepositionHandElements(bool IsRightHand, FTransform NewTransformForProcComps)
 {
-    if (IsRightHand)
-    {
-        if (IsValid(RightMotionController->DisplayComponent))
-        {
-            RightMotionController->DisplayComponent->SetRelativeTransform(NewTransformForProcComps);
-        }
-    }
-    else
-    {
-        if (IsValid(LeftMotionController->DisplayComponent))
-        {
-            LeftMotionController->DisplayComponent->SetRelativeTransform(NewTransformForProcComps);
-        }
-    }
+    // Display component is gone now, this would be used with the new device visualization comps
+    //if (IsRightHand)
+    //{
+    //    if (IsValid(RightMotionController->DisplayComponent))
+    //    {
+    //        RightMotionController->DisplayComponent->SetRelativeTransform(NewTransformForProcComps);
+    //    }
+    //}
+    //else
+    //{
+    //    if (IsValid(LeftMotionController->DisplayComponent))
+    //    {
+    //        LeftMotionController->DisplayComponent->SetRelativeTransform(NewTransformForProcComps);
+    //    }
+    //}
 }
 
 void AxREAL_VRCharacter::ShouldSocketGrip(UPARAM(ref) FBPActorGripInformation& Grip, bool& ShouldSocket, USceneComponent*& SocketParent, FTransform_NetQuantize& RelativeTransform, FName& OptionalSocketName)

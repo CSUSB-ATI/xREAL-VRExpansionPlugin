@@ -9,6 +9,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "xREAL_VRCharacter.h"
 #include "NavigationSystem.h"
+#include "HeadMountedDisplayFunctionLibrary.h"
 #include "EnhancedInputComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -395,9 +396,12 @@ void ATeleportController::UpdateArcEndpoint(FVector NewLocation, bool ValidLocat
 
 void ATeleportController::GetTeleportDestination(bool RelativeToHMD, FVector &Location, FRotator &Rotation)
 {
-    FVector devicePosition;
-    FQuat deviceRotation;
-    //GEngine->XRSystem->GetCurrentPose(IXRTrackingSystem::HMDDeviceId, deviceRotation, devicePosition);
+    FVector devicePosition = FVector();
+    // Rotation is not being used
+    FRotator deviceRotation = FRotator();
+
+    UHeadMountedDisplayFunctionLibrary::GetOrientationAndPosition(deviceRotation, devicePosition);
+    
     if (RelativeToHMD)
     {
         FVector heightAgnosticPosition = FVector(devicePosition.X, devicePosition.Y, 0.0f);
