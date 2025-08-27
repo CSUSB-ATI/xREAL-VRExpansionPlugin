@@ -108,8 +108,6 @@ void AxREAL_VRCharacter::InitializeDefaults()
 
     CurrentControllerTypeXR = EBPOpenXRControllerDeviceType::DT_SimpleController;
 
-    InputConfig = FindFirstObjectSafe<UPlayerMappableInputConfig>(TEXT("/VRExpansionPlugin/VRE/Input/VREInputConfig.VREInputConfig"));
-
     HeadsetType = EBPHMDDeviceType::DT_OculusHMD;
 
     SpawnGraspingHands = true;
@@ -850,8 +848,10 @@ void AxREAL_VRCharacter::MapInput()
     FModifyContextOptions inputOptions = FModifyContextOptions();
     inputOptions.bForceImmediately = true;
     inputOptions.bIgnoreAllPressedKeysUntilRelease = true;
-    //TODO: Change the following to work for UE5.3+ input mapping should be done with user settings?
-    //InputSubsystem->AddPlayerMappableConfig(InputConfig, inputOptions);
+    for (int i = 0; i < InputContext.Num(); i++)
+    {
+        InputSubsystem->AddMappingContext(InputContext[i], 0, inputOptions);
+    }
 }
 
 void AxREAL_VRCharacter::CalculateRelativeVelocities()

@@ -18,6 +18,7 @@ class UNoRepSphereComponent;
 class UTextRenderComponent;
 class UVOIPTalker;
 class UInputAction;
+class UInputMappingContext;
 class AWristMenuActor;
 class UTeleportComponent;
 
@@ -749,7 +750,7 @@ public:
 	EBPOpenXRControllerDeviceType CurrentControllerTypeXR;
 
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, Category="Input")
-	TObjectPtr<UPlayerMappableInputConfig> InputConfig;
+	TArray<TObjectPtr<UInputMappingContext>> InputContext;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Movement")
 	bool bTwoHandMovement;

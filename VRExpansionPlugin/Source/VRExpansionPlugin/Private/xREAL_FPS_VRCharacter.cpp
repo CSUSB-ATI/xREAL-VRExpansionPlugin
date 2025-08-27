@@ -28,7 +28,6 @@ AxREAL_FPS_VRCharacter::AxREAL_FPS_VRCharacter(const FObjectInitializer& ObjectI
 	VRMovementReference->bUseClientControlRotation = true;
 	VRMovementReference->GetNavAgentPropertiesRef().bCanCrouch = true;
 
-    InputConfig = FindFirstObjectSafe<UPlayerMappableInputConfig>(TEXT("/VRExpansionPlugin/VRE/Input/FPSInputConfig.FPSInputConfig"));
 }
 
 void AxREAL_FPS_VRCharacter::BeginPlay()
