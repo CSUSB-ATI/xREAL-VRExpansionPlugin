@@ -47,5 +47,6 @@ void AWristMenuActor::Tick(float DeltaTime)
 void AWristMenuActor::SetWristMenuEnabled(bool bEnabled)
 {
 	WidgetComponent->SetVisibility(bEnabled);
+	WidgetComponent->SetCollisionEnabled(bEnabled ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 }
 
